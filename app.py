@@ -2,10 +2,10 @@ from flask import Flask, request, jsonify
 import requests, os
 
 OWNER = "marjjo"
-REPO = "bamboo_images"
+REPO = "bamboo_images"   # exact repo name
 BRANCH = "main"
 BASE_PATH = "images"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")  # only needed if repo is private
 
 app = Flask(__name__)
 
@@ -39,7 +39,7 @@ def walk_images(path):
 
 @app.get("/")
 def home():
-    return "Bamboo Image API (Render)"
+    return "Bamboo Image API (Railway)"
 
 @app.get("/images")
 def list_images():
@@ -59,4 +59,6 @@ def list_images():
     return jsonify({"count": len(results), "items": results})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # for local testing only; Railway will use gunicorn
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
