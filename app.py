@@ -4,7 +4,7 @@ import os
 
 # --- CONFIG: set these to YOUR repo ---
 OWNER = "marjjo"
-REPO = "bamboo-images"          # your repo name
+REPO = "bamboo_images"          # your repo name
 BRANCH = "main"                 # or "master"
 BASE_PATH = "images"            # top folder that holds all images
 # --------------------------------------
