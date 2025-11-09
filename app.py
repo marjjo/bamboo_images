@@ -58,6 +58,44 @@ def list_images():
             break
     return jsonify({"count": len(results), "items": results})
 
+from openai import OpenAI
+import base64
+
+# create a single client (reads OPENAI_API_KEY from env)
+_oai = OpenAI()
+
+@app.post("/generate")
+def generate_image():
+    """
+    JSON body:
+      {
+        "prompt": "hypar petung bamboo pavilion at night",
+        "size": "1024x1024"     # optional: 256x256, 512x512, 1024x1024
+      }
+    Returns:
+      { "b64": "<base64_png>", "size": "1024x1024" }
+    """
+    data = request.get_json(force=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    size = (data.get("size") or "1024x1024").strip()
+
+    if not prompt:
+        return jsonify({"error": "Missing 'prompt'"}), 400
+
+    # call OpenAI Images
+    try:
+        resp = _oai.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size=size,
+            n=1
+        )
+        # OpenAI returns base64
+        b64 = resp.data[0].b64_json
+        return jsonify({"b64": b64, "size": size})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     # for local testing only; Railway will use gunicorn
     port = int(os.getenv("PORT", 5000))
