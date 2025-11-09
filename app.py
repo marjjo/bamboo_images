@@ -82,5 +82,5 @@ def list_images():
     return jsonify({"items": results, "count": len(results)})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
 
