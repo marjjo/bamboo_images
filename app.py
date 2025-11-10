@@ -304,6 +304,14 @@ def generate_image():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.get("/openapi.yaml")
+def openapi_spec():
+    path = os.path.join(os.path.dirname(__file__), "openapi.yaml")
+    if not os.path.exists(path):
+        return jsonify({"error": "openapi.yaml not found"}), 404
+    with open(path, "r", encoding="utf-8") as f:
+        return app.response_class(f.read(), mimetype="text/yaml")
+
 # ==============================
 # Entry Point
 # ==============================
