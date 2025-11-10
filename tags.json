@@ -1,0 +1,11 @@
+{
+  "material.bamboo": { "group": "material", "prompt": "constructed from natural bamboo canes", "syn": ["bamboo"] },
+  "collection.precedent": { "group": "collection", "prompt": "inspired by built precedents and case studies", "syn": ["precedent","precedents"] },
+  "scale.pavilion": { "group": "scale", "prompt": "open-air pavilion", "syn": ["pavilion"] },
+  "program.resort": { "group": "program", "prompt": "small resort or eco-lodge program", "syn": ["resort","lodge","hospitality"] },
+
+  "style.contemporary": { "group": "style", "prompt": "contemporary tropical architecture", "syn": ["modern_tropical"] },
+  "context.tropical":   { "group": "context", "prompt": "lush tropical setting" },
+  "lighting.golden_hour": { "group": "lighting", "prompt": "golden hour lighting" },
+  "camera.wide": { "group": "camera", "prompt": "wide-angle architectural photograph" }
+}
