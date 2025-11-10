@@ -312,6 +312,28 @@ def openapi_spec():
     with open(path, "r", encoding="utf-8") as f:
         return app.response_class(f.read(), mimetype="text/yaml")
 
+@app.get("/health")
+def health():
+    # ensure latest tags.json (auto-reload)
+    maybe_reload_schema()
+
+    # Check GitHub access to your repo path
+    gh_ok, gh_msg = True, "ok"
+    try:
+        _ = gh_list(BASE_PATH)   # uses your existing GitHub helper
+    except Exception as e:
+        gh_ok, gh_msg = False, str(e)
+
+    # Check OpenAI key presence (don't expose the key!)
+    oa_ok = bool(OPENAI_API_KEY)
+
+    status = "ok" if (gh_ok and oa_ok) else "degraded"
+    return jsonify({
+        "status": status,
+        "github": {"ok": gh_ok, "detail": gh_msg},
+        "openai_key": {"ok": oa_ok}
+    })
+
 # ==============================
 # Entry Point
 # ==============================
