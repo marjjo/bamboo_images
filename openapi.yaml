@@ -1,57 +1,196 @@
 openapi: 3.1.0
 info:
   title: Bamboo Images API
-  version: 1.0.0
+  version: "1.0.0"
+  description: |
+    API for accessing bamboo image datasets, tag schema, and DALL·E-based image generation.
+    Designed for integration with the BambooNation Custom GPT.
 servers:
   - url: https://bamboo-images.onrender.com
 paths:
-  /images:
+  /:
     get:
-      operationId: listImages
-      summary: List and search available bamboo images
-      parameters:
-        - in: query
-          name: tags
-          schema: { type: string }
-          description: Comma-separated folder names (e.g. "hypar,petung")
-        - in: query
-          name: q
-          schema: { type: string }
-          description: Keyword search in file name or tags
-        - in: query
-          name: limit
-          schema:
-            type: integer
-            default: 6
-            minimum: 1
-            maximum: 24
-          description: Maximum number of results to return
+      operationId: root
+      summary: API home route
       responses:
-        '200':
-          description: OK
+        "200":
+          description: Basic server status message
+
+  /tags:
+    get:
+      operationId: listTags
+      summary: Get the effective tag schema (tags.json + auto-discovered folders)
+      responses:
+        "200":
+          description: List of available tags
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  count: { type: integer }
+                  tags:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key:
+                          type: string
+                          example: "scale.pavilion"
+                        group:
+                          type: string
+                          example: "scale"
+                        prompt:
+                          type: string
+                          example: "open-air pavilion"
+                        syn:
+                          type: array
+                          items:
+                            type: string
+
+  /images:
+    get:
+      operationId: listImages
+      summary: List all available images from GitHub
+      parameters:
+        - in: query
+          name: tags
+          schema:
+            type: string
+          description: Comma-separated canonical tags (e.g., scale.pavilion,program.resort)
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Free-text query across title and tags
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 8
+            minimum: 1
+            maximum: 100
+          description: Number of items to return
+      responses:
+        "200":
+          description: List of images with tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
                   items:
                     type: array
                     items:
                       type: object
-                      required: [id, url, title]
                       properties:
-                        id: { type: string }
-                        title: { type: string }
-                        url: { type: string, format: uri }
+                        id:
+                          type: string
+                          example: "b7c3d9a2"
+                        url:
+                          type: string
+                          format: uri
+                          example: "https://raw.githubusercontent.com/marjjo/bamboo_images/main/images/precedents/pavilion/example.jpg"
+                        title:
+                          type: string
                         tags:
                           type: array
-                          items: { type: string }
+                          items:
+                            type: string
+
+  /search:
+    get:
+      operationId: searchImages
+      summary: Search images using tags or text
+      parameters:
+        - in: query
+          name: tags
+          schema:
+            type: string
+          description: Comma-separated REQUIRED tags (must all match)
+        - in: query
+          name: any
+          schema:
+            type: string
+          description: Comma-separated OPTIONAL tags (match ANY)
+        - in: query
+          name: q
+          schema:
+            type: string
+          description: Free-text search over id, title, and tag keys
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 12
+            minimum: 1
+            maximum: 100
+          description: Maximum number of results
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        url:
+                          type: string
+                          format: uri
+                        title:
+                          type: string
+                        tags:
+                          type: array
+                          items:
+                            type: string
+
+  /prompt:
+    get:
+      operationId: buildPrompt
+      summary: Build a DALL·E-ready prompt from tags or an image id
+      parameters:
+        - in: query
+          name: tags
+          schema:
+            type: string
+          description: Comma-separated canonical tags (e.g., material.bamboo,scale.pavilion)
+        - in: query
+          name: id
+          schema:
+            type: string
+          description: Use an existing image ID to extract its tags
+      responses:
+        "200":
+          description: Prompt generated from tags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tags:
+                    type: array
+                    items:
+                      type: string
+                  prompt:
+                    type: string
+                    example: >
+                      constructed from natural bamboo canes, open-air pavilion, contemporary tropical architecture,
+                      lush tropical setting, high-detail, photorealistic, architectural visualization
 
   /generate:
     post:
       operationId: generateImage
-      summary: Generate a new image (optional if you use DALL·E directly)
+      summary: Generate a DALL·E image from a prompt
       requestBody:
         required: true
         content:
@@ -60,18 +199,26 @@ paths:
               type: object
               required: [prompt]
               properties:
-                prompt: { type: string }
+                prompt:
+                  type: string
+                  example: >
+                    open-air pavilion in natural bamboo, contemporary tropical architecture, lush tropical setting,
+                    high-detail, photorealistic, architectural visualization
                 size:
                   type: string
-                  enum: ["1024x1024", "1024x1536", "1536x1024", "auto"]
                   default: "1024x1024"
+                  enum: ["256x256", "512x512", "1024x1024", "2048x2048"]
       responses:
-        '200':
-          description: Image generated successfully
+        "200":
+          description: Base64-encoded image result
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  b64: { type: string, description: Base64-encoded PNG data }
-                  size: { type: string }
+                  b64:
+                    type: string
+                    description: Base64-encoded image data
+                  size:
+                    type: string
+                    example: "1024x1024"
