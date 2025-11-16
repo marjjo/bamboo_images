@@ -1,161 +1,107 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests
-import os
-import json
+import requests, os, json
 
 # ==============================
-# Config
+# Basic Config
 # ==============================
 OWNER = "marjjo"
-REPO = "bamboo_images"
+REPO = "bamboo_images"       # your GitHub repo name
 BRANCH = "main"
-BASE_PATH = "images"  # top-level folder in the repo where images live
+BASE_PATH = "images"         # top-level folder for images in the repo
 
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")          # optional, for higher rate limits
-TAGS_PATH = os.getenv("TAGS_PATH", "tags.json")   # local tags definition file
-ANNO_PATH = os.getenv("ANNO_PATH", "annotations.json")  # local annotations file
+# Optional: GitHub token for higher rate limits (set as env var on Render)
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+# Path to annotations file (extra tags per image)
+ANNOTATIONS_PATH = os.getenv("ANNOTATIONS_PATH", "annotations.json")
 
 app = Flask(__name__)
 CORS(app)
 
-
 # ==============================
-# Helpers: load JSON configs
+# Load annotations.json
 # ==============================
-def load_json(path):
+def load_annotations(path: str = ANNOTATIONS_PATH):
+    """
+    Load extra tags for images from annotations.json.
+    Expected format:
+    {
+      "filename.jpg": ["geometry.hypar", "environment.resort", ...],
+      ...
+    }
+    """
     if not os.path.exists(path):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # Ensure values are always lists
+        norm = {}
+        for fname, tags in data.items():
+            if isinstance(tags, list):
+                norm[fname] = [str(t).strip() for t in tags if str(t).strip()]
+        return norm
     except Exception as e:
         print(f"[WARN] Failed to load {path}: {e}")
         return {}
 
-
-def load_tags_schema():
-    """
-    tags.json format (example):
-
-    {
-      "geometry.hypar": {
-        "group": "geometry",
-        "label": "Hypar shell",
-        "syn": ["hypar", "hyperbolic paraboloid"]
-      },
-      "species.petung": {
-        "group": "species",
-        "label": "Petung bamboo",
-        "syn": ["petung"]
-      }
-    }
-    """
-    return load_json(TAGS_PATH)
-
-
-def load_annotations():
-    """
-    annotations.json format (example):
-
-    {
-      "hypar_ibuku_01.jpg": {
-        "tags": ["geometry.hypar", "environment.resort", "species.petung"],
-        "title": "Hypar Bamboo Pavilion",
-        "source": "Ibuku, Bali",
-        "notes": "Hypar shell using Petung bamboo for resort context."
-      }
-    }
-    """
-    return load_json(ANNO_PATH)
-
-
-TAGS_SCHEMA = load_tags_schema()
 ANNOTATIONS = load_annotations()
-
 
 # ==============================
 # GitHub helpers
 # ==============================
-def gh_list(path):
-    """List files/folders at a GitHub path using the Contents API."""
+def gh_list(path: str):
+    """
+    List files/folders at a GitHub path using the Contents API.
+    """
     base = f"https://api.github.com/repos/{OWNER}/{REPO}"
     suffix = f"/contents/{path}" if path else "/contents"
     url = f"{base}{suffix}?ref={BRANCH}"
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+
+    headers = {}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
+
     r = requests.get(url, headers=headers, timeout=15)
     r.raise_for_status()
     return r.json()
 
-
-def folder_tags_from_relpath(rel_path: str):
+# ==============================
+# Tag helpers
+# ==============================
+def canonicalize_parts(parts):
     """
-    Convert a path like "geometry/hypar/pavilion01.jpg"
-    into a list of canonical folder-based tags, e.g. ["geometry.hypar"].
-
-    Assumes top-level folder names are groups:
-      geometry/, species/, joinery/, assembly/, bending/, form/,
-      environment/, lighting/, style/
-    """
-    rel_path = rel_path.strip("/")
-
-    if not rel_path:
-        return []
-
-    parts = rel_path.split("/")  # e.g. ["geometry", "hypar", "pavilion01.jpg"]
-    if len(parts) < 2:
-        return []
-
-    group = parts[0]       # "geometry"
-    value = parts[1]       # "hypar"
-    return [f"{group}.{value}"]
-
-
-def parse_filename_meta(filename: str):
-    """
-    Parse filenames of the form 'title_source_number.ext'
-    into (title, source, index).
+    Convert folder parts into canonical tag strings.
 
     Example:
-      'hypar_ibuku_01.jpg' =>
-         title  = 'Hypar'
-         source = 'Ibuku'
-         index  = '01'
+      rel path: geometry/hypar/pavilion_01.jpg
+      parts   : ["geometry", "hypar"]
+      tags    : ["geometry.hypar"]
+
+    For deeper nests like environment/resort/beach:
+      parts   : ["environment", "resort", "beach"]
+      tags    : ["environment.resort", "environment.beach"]
     """
-    name, _dot, ext = filename.partition(".")
-    parts = name.split("_")
+    tags = []
+    if not parts:
+        return tags
 
-    title = None
-    source = None
-    index = None
+    category = parts[0].strip() if parts[0] else None
+    if not category:
+        return tags
 
-    if len(parts) >= 3:
-        title = parts[0].replace("-", " ").strip() or None
-        source = parts[1].replace("-", " ").strip() or None
-        index = parts[2].strip() or None
-    elif len(parts) == 2:
-        title = parts[0].replace("-", " ").strip() or None
-        source = parts[1].replace("-", " ").strip() or None
-    elif len(parts) == 1:
-        title = parts[0].replace("-", " ").strip() or None
+    for p in parts[1:]:
+        p = (p or "").strip()
+        if not p:
+            continue
+        tags.append(f"{category}.{p}")
+    return tags
 
-    # Capitalize nicely if present
-    if title:
-        title = title.title()
-    if source:
-        source = source.title()
-
-    return title, source, index
-
-
-def walk_images(path):
+def walk_images(path: str):
     """
-    Walk all image files under BASE_PATH using GitHub Contents API.
-
-    For each image:
-      - derive folder-based tags (e.g. geometry.hypar)
-      - merge annotation-based tags from annotations.json
-      - parse filename into title/source if needed
+    Recursively walk the BASE_PATH in GitHub and yield image items
+    with merged tags (folder-derived + annotations.json).
     """
     stack = [path]
     while stack:
@@ -166,134 +112,105 @@ def walk_images(path):
             for it in items:
                 if it["type"] == "dir":
                     stack.append(it["path"])
-                elif it["type"] == "file" and it["name"].lower().endswith(
-                    (".jpg", ".jpeg", ".png", ".gif", ".webp")
+                elif (
+                    it["type"] == "file"
+                    and it["name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))
                 ):
-                    # Relative path inside BASE_PATH
-                    rel = it["path"][len(BASE_PATH):].strip("/")  # e.g. "geometry/hypar/img.jpg"
-                    folder_tags = folder_tags_from_relpath(rel)
+                    # Relative path under BASE_PATH (e.g. "geometry/hypar/file.jpg")
+                    rel = it["path"][len(BASE_PATH):].strip("/")
+                    parts = rel.split("/")[:-1]  # folder parts only
+                    folder_tags = canonicalize_parts(parts)
 
-                    # Load annotation for this filename if present
-                    anno = ANNOTATIONS.get(it["name"], {}) or ANNOTATIONS.get(it["path"], {})
+                    fname = it["name"]
+                    extra_tags = ANNOTATIONS.get(fname, [])
 
-                    extra_tags = anno.get("tags", [])
-                    combined_tags = sorted(set(folder_tags) | set(extra_tags))
-
-                    # Title/source from annotations or from filename
-                    parsed_title, parsed_source, _idx = parse_filename_meta(it["name"])
-                    title = anno.get("title") or parsed_title or it["name"]
-                    source = anno.get("source") or parsed_source
-
-                    # Optional notes
-                    notes = anno.get("notes")
+                    # Merge and deduplicate
+                    all_tags = sorted(set(folder_tags) | set(extra_tags))
 
                     yield {
                         "id": it["sha"][:8],
-                        "filename": it["name"],
-                        "path": it["path"],
                         "url": it["download_url"],
-                        "title": title,
-                        "source": source,
-                        "tags": combined_tags,
-                        "notes": notes,
+                        "title": fname,
+                        "tags": all_tags,
                     }
 
-
-def list_all_images(limit: int = None, required_tags=None, q: str = ""):
+def list_all_images(limit: int = 1000):
     """
-    Return up to `limit` images, optionally filtered by:
-      - required_tags: list of canonical tag keys that ALL must be present
-      - q: free-text search over filename, title, source, and tags
+    Collect up to `limit` images from the repo with their tags.
     """
-    required = set(required_tags or [])
-    q = (q or "").lower().strip()
-
     results = []
     for item in walk_images(BASE_PATH):
-        # tag filter
-        if required and not required.issubset(set(item["tags"])):
-            continue
-
-        # free-text search
-        if q:
-            haystack = " ".join([
-                item.get("filename", ""),
-                item.get("title", "") or "",
-                item.get("source", "") or "",
-                " ".join(item.get("tags", [])),
-            ]).lower()
-            if q not in haystack:
-                continue
-
         results.append(item)
-        if limit and len(results) >= limit:
+        if len(results) >= limit:
             break
-
     return results
-
 
 # ==============================
 # Routes
 # ==============================
 @app.get("/")
 def home():
-    return "Hi marjo! You've reached Bamboo Image API (images + tags + annotations)"
-
+    return "Bamboo Image API (images + tags)"
 
 @app.get("/images")
 def list_images():
     """
-    Query parameters:
-      - tags: comma-separated canonical tags (e.g. geometry.hypar,species.petung)
-      - q: free-text search over filename, title, source, tags
-      - limit: max number of results (default 8)
+    Query params:
+      - tags: comma-separated, all MUST be present in image.tags
+      - any : comma-separated, at least one MUST be present (optional)
+      - q   : free text search in title or tags (optional)
+      - limit: max number of images (default 8)
     """
-    tag_str = request.args.get("tags", "").strip()
-    q = request.args.get("q", "").strip()
-    limit = int(request.args.get("limit", 8))
+    tags_param = request.args.get("tags", "").strip()
+    any_param  = request.args.get("any", "").strip()
+    q          = request.args.get("q", "").strip().lower()
+    limit      = int(request.args.get("limit", 8))
 
-    want_tags = [t.strip() for t in tag_str.split(",") if t.strip()]
-    items = list_all_images(limit=limit, required_tags=want_tags, q=q)
-    return jsonify({"count": len(items), "items": items})
+    required_tags = {t.strip() for t in tags_param.split(",") if t.strip()}
+    any_tags      = {t.strip() for t in any_param.split(",") if t.strip()}
 
+    images = list_all_images(limit=10_000)
+    results = []
+
+    for img in images:
+        tagset = set(img.get("tags", []))
+
+        # Require all required_tags
+        if required_tags and not required_tags.issubset(tagset):
+            continue
+
+        # Require at least one of any_tags (if provided)
+        if any_tags and not (tagset & any_tags):
+            continue
+
+        # Text search in title or tags
+        if q:
+            hay = (img.get("title", "") + " " + " ".join(img.get("tags", []))).lower()
+            if q not in hay:
+                continue
+
+        results.append(img)
+        if len(results) >= limit:
+            break
+
+    return jsonify({"count": len(results), "items": results})
 
 @app.get("/tags")
 def list_tags():
     """
-    Return tag definitions from tags.json + any discovered folder-based tags.
+    Return all unique tags (folder-based + annotations) used in the library.
     """
-    # Static schema from tags.json
-    schema = load_tags_schema()
-
-    # Discover tags from folder structure
-    discovered = set()
-    for item in list_all_images(limit=None):
-        for t in item.get("tags", []):
-            discovered.add(t)
-
-    # Ensure all discovered tags exist in the schema, at least minimally
-    for t in sorted(discovered):
-        if t not in schema:
-            group = t.split(".", 1)[0] if "." in t else "misc"
-            schema[t] = {
-                "group": group,
-                "label": t,
-                "syn": [],
-            }
-
-    # Return as a list
-    out = [
-        {"key": k, **v}
-        for k, v in sorted(schema.items(), key=lambda kv: kv[0])
-    ]
-    return jsonify({"tags": out})
-
+    images = list_all_images(limit=10_000)
+    all_tags = set()
+    for img in images:
+        for t in img.get("tags", []):
+            all_tags.add(t)
+    return jsonify({"count": len(all_tags), "tags": sorted(all_tags)})
 
 @app.get("/health")
 def health():
     """
-    Basic health check:
-      - can we reach the GitHub repo and list BASE_PATH?
+    Simple health check: confirms GitHub access and annotations load.
     """
     gh_ok, gh_msg = True, "ok"
     try:
@@ -301,15 +218,18 @@ def health():
     except Exception as e:
         gh_ok, gh_msg = False, str(e)
 
+    ann_ok = bool(ANNOTATIONS) or os.path.exists(ANNOTATIONS_PATH)
+
     status = "ok" if gh_ok else "degraded"
+
     return jsonify({
         "status": status,
         "github": {"ok": gh_ok, "detail": gh_msg},
+        "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH}
     })
 
-
 # ==============================
-# Entry Point
+# Entry Point (local dev)
 # ==============================
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
