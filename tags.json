@@ -1,11 +1,47 @@
 {
-  "material.bamboo": { "group": "material", "prompt": "constructed from natural bamboo canes", "syn": ["bamboo"] },
-  "collection.precedent": { "group": "collection", "prompt": "inspired by built precedents and case studies", "syn": ["precedent","precedents"] },
-  "scale.pavilion": { "group": "scale", "prompt": "open-air pavilion", "syn": ["pavilion"] },
-  "program.resort": { "group": "program", "prompt": "small resort or eco-lodge program", "syn": ["resort","lodge","hospitality"] },
-
-  "style.contemporary": { "group": "style", "prompt": "contemporary tropical architecture", "syn": ["modern_tropical"] },
-  "context.tropical":   { "group": "context", "prompt": "lush tropical setting" },
-  "lighting.golden_hour": { "group": "lighting", "prompt": "golden hour lighting" },
-  "camera.wide": { "group": "camera", "prompt": "wide-angle architectural photograph" }
+  "structure_system.hypar": {
+    "group": "structure_system",
+    "prompt": "hyperbolic paraboloid structure",
+    "syn": ["hyperbolic paraboloid", "hypar"]
+  },
+  "structure_system.gridshell": {
+    "group": "structure_system",
+    "prompt": "gridshell structure",
+    "syn": ["gridshell", "dome", "hyperbola"]
+  },
+  "structure_system.hyperbolic tower": {
+    "group": "structure_system",
+    "prompt": "hyperbolic tower structure",
+    "syn": ["hyperbolic collumn", "center collumn"]
+  },
+  "structure_system.post&beam": {
+    "group": "structure_system",
+    "prompt": "post and beam structure",
+    "syn": ["post and beam", "conventional bamboo construction"]
+  },
+  "structure_system.truss": {
+    "group": "structure_system",
+    "prompt": "truss structure",
+    "syn": ["truss", "frame"]
+  },
+  "form_language.geometric": {
+    "group": "form_language",
+    "prompt": "geometric-shaped structure",
+    "syn": ["triangular", "polygon"]
+  }
+  "form_language.modular": {
+    "group": "form_language",
+    "prompt": "modular expression structure",
+    "syn": ["rythm", "modular", "typical"]
+  }
+  "form_language.geometric": {
+    "group": "form_language",
+    "prompt": "organic-shaped structure",
+    "syn": ["biomimicry", "natural", "free form", "wave"]
+  }
+  "assembly.multiple": {
+    "group": "joinery",
+    "prompt": "beam to beam joinery",
+    "syn": ["biomimicry", "natural", "free form", "wave"]
+  }
 }

@@ -1,0 +1,156 @@
+{
+  "bamboo apus_#_1.jpg": {
+    "tags": [
+      "color.greenish-yellow",
+      "context.blank"
+    ]
+  }
+  "bamboo apus_#_2.jpg": {
+    "tags": [
+      "color.greenish-yellow"
+    ]
+  }
+  "bamboo petung_#_1.jpg": {
+    "tags": [
+      "color.yellowish-green",
+      "context.forest"
+    ]
+  }
+  "bamboo petung_#_2.jpg": {
+    "tags": [
+      "color.yellowish-green",
+      "context.forest"
+    ]
+  }
+  "bamboo petung_#_3.jpg": {
+    "tags": [
+      "color.yellowish-green",
+      "context.forest"
+    ]
+  }
+  "bamboo wulung_#_1.jpg": {
+    "tags": [
+      "color.greenish-black",
+      "context.blank"
+    ]
+  }
+  "bamboo auditorium_instituto de vivienda_1.jpg": {
+    "tags": [
+      "program.auditorium",
+      "program.pavilion",
+      "context.community-centre"
+    ]
+  }
+  "bamboo pavilion_dumaguete PH_1.jpg": {
+    "tags": [
+      "program.pavilion",
+    ]
+  }
+  "hypar bridge_jorg stamm_1.jpg": {
+    "tags": [
+      "program.bridge",
+      "program.pavilion",
+      "context.jungle"
+    ]
+  }
+  "keeng_bambu build_1.jpg": {
+    "tags": [
+      "program.restaurant",
+      "program.pavilion",
+    ]
+  }
+  "ocuyrey guarani MBYA community hall_julio ignacio perez_1.jpg": {
+    "tags": [
+      "program.community",
+      "program.pavilion",
+      "context.jungle"
+    ]
+  }
+  "the bamboo garden_atelier_1.jpg": {
+    "tags": [
+      "scale.20_meters"
+      "program.pavilion",
+      "context.park"
+      "image_type.exterior"
+    ]
+  }
+  "bamboo pavilion_asali bali_1.jpg": {
+    "tags": [
+      "scale.10_meters"
+      "program.pavilion",
+      "context.mountain"
+      "image_type.exterior"
+    ]
+  }
+  "manta yoga shala_pablo luna_1.jpg": {
+    "tags": [
+      "scale.15_meters"  
+      "program.pavilion",    
+      "program.yoga",
+      "image_type.interior"
+    ]
+  }
+  "manta yoga shala_pablo luna_2.jpg": {
+    "tags": [
+      "scale.15_meters"
+      "program.pavilion",
+      "program.yoga",
+      "context.resort"
+      "image_type.interior"
+    ]
+  }
+  "yoga shala_luum zama_1.jpg": {
+    "tags": [
+      "scale.15_meters"
+      "program.pavilion",
+      "program.yoga",
+      "image_type.interior"
+    ]
+  }
+  "japanese bamboo pavilion_shigeru ban_1.jpg": {
+    "tags": [
+      "scale.20_meters"
+      "program.pavilion",
+      "image_type.interior"
+    ]
+  }
+  "hypar_#_1.jpg": {
+    "tags": [
+      "scale.15_meters"
+      "program.pavilion",
+      "image_type.exterior"
+    ]
+  }
+  "green school bali_ibuku_1.jpg": {
+    "tags": [
+      "scale.20_meters"
+      "program.school",
+      "program.pavilion",
+      "image_type.interior"
+    ]
+  }
+  "hyperbolic tower_jorg stamm_1.jpg": {
+    "tags": [
+      "scale.10_meters"
+      "program.tower",
+      "program.viewing_deck",
+      "image_type.exterior"
+    ]
+  }
+  "bamboo sports hall_chianmai life architects & construction_1.jpg": {
+    "tags": [
+      "scale.50_meters"
+      "program.sports",
+      "program.pavilion",
+      "image_type.interior"
+    ]
+  }
+  "community training center_pounamu_1.jpg": {
+    "tags": [
+      "scale.15_meters"
+      "program.community",
+      "program.viewing_deck",
+      "image_type.interior"
+    ]
+  }
+}
