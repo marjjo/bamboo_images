@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests, os
+import requests
+import os
+import json
 
 # ==============================
 # Config
@@ -8,96 +10,74 @@ import requests, os
 OWNER = "marjjo"
 REPO = "bamboo_images"
 BRANCH = "main"
-BASE_PATH = "images"
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+BASE_PATH = "images"  # top-level folder in the repo where images live
+
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")          # optional, for higher rate limits
+TAGS_PATH = os.getenv("TAGS_PATH", "tags.json")   # local tags definition file
+ANNO_PATH = os.getenv("ANNO_PATH", "annotations.json")  # local annotations file
 
 app = Flask(__name__)
 CORS(app)
 
+
 # ==============================
-# Folder → Canonical Tag Mapping
+# Helpers: load JSON configs
 # ==============================
-# Top-level folders that act as "groups"
-TAG_GROUPS = {
-    "geometry",
-    "species",
-    "joinery",
-    "assembly",
-    "bending",
-    "form",
-    "environment",
-    "lighting",
-    "style",
-    "collection",   # optional legacy
-    "material"      # optional legacy
-}
-
-# Optional mapping for some legacy/simple names to canonical tags
-FOLDER_CANON = {
-    # legacy / simple folders → canonical tag
-    "bamboo": "material.bamboo",
-    "precedents": "collection.precedent",
-
-    # group folders map to themselves (group name)
-    "geometry": "geometry",
-    "species": "species",
-    "joinery": "joinery",
-    "assembly": "assembly",
-    "bending": "bending",
-    "form": "form",
-    "environment": "environment",
-    "lighting": "lighting",
-    "style": "style",
-    "collection": "collection",
-    "material": "material",
-}
+def load_json(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[WARN] Failed to load {path}: {e}")
+        return {}
 
 
-def canonicalize_parts(parts):
+def load_tags_schema():
     """
-    Turn folder path segments into canonical tags.
+    tags.json format (example):
 
-    Example:
-      images/geometry/hypar/file.jpg
-      → parts = ["geometry", "hypar"]
-      → tags = ["geometry", "geometry.hypar"]
-
-      images/species/petung/...
-      → ["species", "species.petung"]
+    {
+      "geometry.hypar": {
+        "group": "geometry",
+        "label": "Hypar shell",
+        "syn": ["hypar", "hyperbolic paraboloid"]
+      },
+      "species.petung": {
+        "group": "species",
+        "label": "Petung bamboo",
+        "syn": ["petung"]
+      }
+    }
     """
-    canon = []
-    for i, p in enumerate(parts):
-        p = (p or "").strip()
-        if not p:
-            continue
+    return load_json(TAGS_PATH)
 
-        # If it's already canonical like "geometry.hypar", keep as is.
-        if "." in p:
-            canon.append(p)
-            continue
 
-        parent = parts[i - 1] if i > 0 else None
+def load_annotations():
+    """
+    annotations.json format (example):
 
-        # If this folder has a parent that is a tag group, combine as "group.value"
-        if parent and parent in TAG_GROUPS:
-            canon.append(f"{parent}.{p}")
-            continue
+    {
+      "hypar_ibuku_01.jpg": {
+        "tags": ["geometry.hypar", "environment.resort", "species.petung"],
+        "title": "Hypar Bamboo Pavilion",
+        "source": "Ibuku, Bali",
+        "notes": "Hypar shell using Petung bamboo for resort context."
+      }
+    }
+    """
+    return load_json(ANNO_PATH)
 
-        # If this folder name itself has a mapping (e.g. "bamboo" -> "material.bamboo")
-        if p in FOLDER_CANON:
-            canon.append(FOLDER_CANON[p])
-            continue
 
-        # Fallback: just use the raw folder name as a tag
-        canon.append(p)
-
-    return canon
+TAGS_SCHEMA = load_tags_schema()
+ANNOTATIONS = load_annotations()
 
 
 # ==============================
 # GitHub helpers
 # ==============================
-def gh_list(path: str):
+def gh_list(path):
     """List files/folders at a GitHub path using the Contents API."""
     base = f"https://api.github.com/repos/{OWNER}/{REPO}"
     suffix = f"/contents/{path}" if path else "/contents"
@@ -108,22 +88,80 @@ def gh_list(path: str):
     return r.json()
 
 
-def walk_images(path: str):
+def folder_tags_from_relpath(rel_path: str):
     """
-    Recursively walk BASE_PATH in the GitHub repo and yield image items with tags.
+    Convert a path like "geometry/hypar/pavilion01.jpg"
+    into a list of canonical folder-based tags, e.g. ["geometry.hypar"].
 
-    Each item:
-      {
-        "id": "...",      # short SHA
-        "url": "https://raw.githubusercontent.com/...",
-        "title": "filename.jpg",
-        "tags": ["geometry.hypar", "environment.resort", ...]
-      }
+    Assumes top-level folder names are groups:
+      geometry/, species/, joinery/, assembly/, bending/, form/,
+      environment/, lighting/, style/
+    """
+    rel_path = rel_path.strip("/")
+
+    if not rel_path:
+        return []
+
+    parts = rel_path.split("/")  # e.g. ["geometry", "hypar", "pavilion01.jpg"]
+    if len(parts) < 2:
+        return []
+
+    group = parts[0]       # "geometry"
+    value = parts[1]       # "hypar"
+    return [f"{group}.{value}"]
+
+
+def parse_filename_meta(filename: str):
+    """
+    Parse filenames of the form 'title_source_number.ext'
+    into (title, source, index).
+
+    Example:
+      'hypar_ibuku_01.jpg' =>
+         title  = 'Hypar'
+         source = 'Ibuku'
+         index  = '01'
+    """
+    name, _dot, ext = filename.partition(".")
+    parts = name.split("_")
+
+    title = None
+    source = None
+    index = None
+
+    if len(parts) >= 3:
+        title = parts[0].replace("-", " ").strip() or None
+        source = parts[1].replace("-", " ").strip() or None
+        index = parts[2].strip() or None
+    elif len(parts) == 2:
+        title = parts[0].replace("-", " ").strip() or None
+        source = parts[1].replace("-", " ").strip() or None
+    elif len(parts) == 1:
+        title = parts[0].replace("-", " ").strip() or None
+
+    # Capitalize nicely if present
+    if title:
+        title = title.title()
+    if source:
+        source = source.title()
+
+    return title, source, index
+
+
+def walk_images(path):
+    """
+    Walk all image files under BASE_PATH using GitHub Contents API.
+
+    For each image:
+      - derive folder-based tags (e.g. geometry.hypar)
+      - merge annotation-based tags from annotations.json
+      - parse filename into title/source if needed
     """
     stack = [path]
     while stack:
         cur = stack.pop()
         items = gh_list(cur)
+
         if isinstance(items, list):
             for it in items:
                 if it["type"] == "dir":
@@ -131,43 +169,64 @@ def walk_images(path: str):
                 elif it["type"] == "file" and it["name"].lower().endswith(
                     (".jpg", ".jpeg", ".png", ".gif", ".webp")
                 ):
-                    rel = it["path"][len(BASE_PATH):].strip("/")  # e.g. "geometry/hypar/file.jpg"
-                    raw_parts = rel.split("/")[:-1]               # folder names only
-                    tags = canonicalize_parts(raw_parts)
+                    # Relative path inside BASE_PATH
+                    rel = it["path"][len(BASE_PATH):].strip("/")  # e.g. "geometry/hypar/img.jpg"
+                    folder_tags = folder_tags_from_relpath(rel)
+
+                    # Load annotation for this filename if present
+                    anno = ANNOTATIONS.get(it["name"], {}) or ANNOTATIONS.get(it["path"], {})
+
+                    extra_tags = anno.get("tags", [])
+                    combined_tags = sorted(set(folder_tags) | set(extra_tags))
+
+                    # Title/source from annotations or from filename
+                    parsed_title, parsed_source, _idx = parse_filename_meta(it["name"])
+                    title = anno.get("title") or parsed_title or it["name"]
+                    source = anno.get("source") or parsed_source
+
+                    # Optional notes
+                    notes = anno.get("notes")
+
                     yield {
                         "id": it["sha"][:8],
+                        "filename": it["name"],
+                        "path": it["path"],
                         "url": it["download_url"],
-                        "title": it["name"],
-                        "tags": [t for t in tags if t],
+                        "title": title,
+                        "source": source,
+                        "tags": combined_tags,
+                        "notes": notes,
                     }
 
 
-def list_all_images(limit: int = 8, any_tags=None, q: str = ""):
+def list_all_images(limit: int = None, required_tags=None, q: str = ""):
     """
-    Return up to `limit` images.
-
-    - any_tags: list of canonical tag strings; image must match AT LEAST ONE of them (OR logic).
-    - q: optional text filter that searches in title and tag strings.
+    Return up to `limit` images, optionally filtered by:
+      - required_tags: list of canonical tag keys that ALL must be present
+      - q: free-text search over filename, title, source, and tags
     """
-    any_set = set(any_tags or [])
+    required = set(required_tags or [])
     q = (q or "").lower().strip()
 
     results = []
     for item in walk_images(BASE_PATH):
-        tagset = set(item.get("tags", []))
-
-        # OR tag filter: if tags requested, must share at least one
-        if any_set and not (tagset & any_set):
+        # tag filter
+        if required and not required.issubset(set(item["tags"])):
             continue
 
-        # q filter: substring in title or tags
+        # free-text search
         if q:
-            hay = (item.get("title", "") + " " + " ".join(tagset)).lower()
-            if q not in hay:
+            haystack = " ".join([
+                item.get("filename", ""),
+                item.get("title", "") or "",
+                item.get("source", "") or "",
+                " ".join(item.get("tags", [])),
+            ]).lower()
+            if q not in haystack:
                 continue
 
         results.append(item)
-        if len(results) >= limit:
+        if limit and len(results) >= limit:
             break
 
     return results
@@ -178,49 +237,63 @@ def list_all_images(limit: int = 8, any_tags=None, q: str = ""):
 # ==============================
 @app.get("/")
 def home():
-    return "Bamboo Image API – returns images + canonical tags for your GPT."
+    return "Hi marjo! You've reached Bamboo Image API (images + tags + annotations)"
 
 
 @app.get("/images")
 def list_images():
     """
-    GET /images?tags=geometry.hypar,environment.forest&q=pavilion&limit=6
-
-    - tags: comma-separated list of canonical tags; image must match ANY of them (OR).
-    - q: optional keyword filter (matches in filename or tag strings).
-    - limit: max number of images to return (default 8).
+    Query parameters:
+      - tags: comma-separated canonical tags (e.g. geometry.hypar,species.petung)
+      - q: free-text search over filename, title, source, tags
+      - limit: max number of results (default 8)
     """
     tag_str = request.args.get("tags", "").strip()
     q = request.args.get("q", "").strip()
     limit = int(request.args.get("limit", 8))
 
-    any_tags = [t.strip() for t in tag_str.split(",") if t.strip()]
-    items = list_all_images(limit=limit, any_tags=any_tags, q=q)
+    want_tags = [t.strip() for t in tag_str.split(",") if t.strip()]
+    items = list_all_images(limit=limit, required_tags=want_tags, q=q)
     return jsonify({"count": len(items), "items": items})
 
 
 @app.get("/tags")
 def list_tags():
     """
-    GET /tags
-
-    Returns all discovered canonical tags from the image library.
-    Useful for your GPT to learn what tags exist.
+    Return tag definitions from tags.json + any discovered folder-based tags.
     """
-    images = list_all_images(limit=10_000)
-    tagset = set()
-    for img in images:
-        for t in img.get("tags", []):
-            tagset.add(t)
+    # Static schema from tags.json
+    schema = load_tags_schema()
 
-    return jsonify({"count": len(tagset), "tags": sorted(tagset)})
+    # Discover tags from folder structure
+    discovered = set()
+    for item in list_all_images(limit=None):
+        for t in item.get("tags", []):
+            discovered.add(t)
+
+    # Ensure all discovered tags exist in the schema, at least minimally
+    for t in sorted(discovered):
+        if t not in schema:
+            group = t.split(".", 1)[0] if "." in t else "misc"
+            schema[t] = {
+                "group": group,
+                "label": t,
+                "syn": [],
+            }
+
+    # Return as a list
+    out = [
+        {"key": k, **v}
+        for k, v in sorted(schema.items(), key=lambda kv: kv[0])
+    ]
+    return jsonify({"tags": out})
 
 
 @app.get("/health")
 def health():
     """
-    Simple health check:
-    - tests access to the GitHub repo path
+    Basic health check:
+      - can we reach the GitHub repo and list BASE_PATH?
     """
     gh_ok, gh_msg = True, "ok"
     try:
@@ -233,18 +306,6 @@ def health():
         "status": status,
         "github": {"ok": gh_ok, "detail": gh_msg},
     })
-
-
-@app.get("/openapi.yaml")
-def openapi_spec():
-    """
-    Serve the OpenAPI spec so your Custom GPT Actions can discover this API.
-    """
-    path = os.path.join(os.path.dirname(__file__), "openapi.yaml")
-    if not os.path.exists(path):
-        return jsonify({"error": "openapi.yaml not found"}), 404
-    with open(path, "r", encoding="utf-8") as f:
-        return app.response_class(f.read(), mimetype="text/yaml")
 
 
 # ==============================
