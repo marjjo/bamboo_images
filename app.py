@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import requests, os, json, time
+import requests, os
 
 # ==============================
 # Config
@@ -10,8 +10,6 @@ REPO = "bamboo_images"
 BRANCH = "main"
 BASE_PATH = "images"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TAGS_PATH = os.getenv("TAGS_PATH", "tags.json")
 
 app = Flask(__name__)
 CORS(app)
@@ -19,159 +17,88 @@ CORS(app)
 # ==============================
 # Folder → Canonical Tag Mapping
 # ==============================
-FOLDER_CANON = {
-    "bamboo": "material.bamboo",
-    "precedents": "collection.precedent",
-    "pavilion": "scale.pavilion",
-    "resort": "program.resort",
-    "shape": "shape",
-    "system": "system",
-    "material": "material",
-    "scale": "scale",
-    "program": "program",
-    "context": "context",
-    "style": "style",
-    "lighting": "lighting",
-    "camera": "camera",
-    "collection": "collection"
+# Top-level folders that act as "groups"
+TAG_GROUPS = {
+    "geometry",
+    "species",
+    "joinery",
+    "assembly",
+    "bending",
+    "form",
+    "environment",
+    "lighting",
+    "style",
+    "collection",   # optional legacy
+    "material"      # optional legacy
 }
 
+# Optional mapping for some legacy/simple names to canonical tags
+FOLDER_CANON = {
+    # legacy / simple folders → canonical tag
+    "bamboo": "material.bamboo",
+    "precedents": "collection.precedent",
+
+    # group folders map to themselves (group name)
+    "geometry": "geometry",
+    "species": "species",
+    "joinery": "joinery",
+    "assembly": "assembly",
+    "bending": "bending",
+    "form": "form",
+    "environment": "environment",
+    "lighting": "lighting",
+    "style": "style",
+    "collection": "collection",
+    "material": "material",
+}
+
+
 def canonicalize_parts(parts):
+    """
+    Turn folder path segments into canonical tags.
+
+    Example:
+      images/geometry/hypar/file.jpg
+      → parts = ["geometry", "hypar"]
+      → tags = ["geometry", "geometry.hypar"]
+
+      images/species/petung/...
+      → ["species", "species.petung"]
+    """
     canon = []
     for i, p in enumerate(parts):
         p = (p or "").strip()
         if not p:
             continue
+
+        # If it's already canonical like "geometry.hypar", keep as is.
         if "." in p:
             canon.append(p)
             continue
-        parent = parts[i-1] if i > 0 else None
-        if parent and parent in FOLDER_CANON and parent in {
-            "shape","system","material","scale","program","context",
-            "style","lighting","camera","collection"
-        }:
+
+        parent = parts[i - 1] if i > 0 else None
+
+        # If this folder has a parent that is a tag group, combine as "group.value"
+        if parent and parent in TAG_GROUPS:
             canon.append(f"{parent}.{p}")
             continue
-        canon.append(FOLDER_CANON.get(p, p))
+
+        # If this folder name itself has a mapping (e.g. "bamboo" -> "material.bamboo")
+        if p in FOLDER_CANON:
+            canon.append(FOLDER_CANON[p])
+            continue
+
+        # Fallback: just use the raw folder name as a tag
+        canon.append(p)
+
     return canon
 
-# ==============================
-# Tag Schema (groups/prompts/synonyms)
-# ==============================
-def load_tags_schema(path: str = TAGS_PATH):
-    if not os.path.exists(path):
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    norm = {}
-    for k, v in data.items():
-        norm[k] = {
-            "group": v.get("group", "misc"),
-            "prompt": v.get("prompt", k.replace("_", " ")),
-            "syn": [s.lower() for s in v.get("syn", [])],
-        }
-    return norm
-
-# Initial schema load
-TAGS_SCHEMA = load_tags_schema()
 
 # ==============================
-# 🔁 Auto-reload for tags.json
+# GitHub helpers
 # ==============================
-_last_reload = 0
-_reload_interval = 60  # seconds
-_last_mtime = None
-
-def maybe_reload_schema(path=TAGS_PATH):
-    """Reload tags.json automatically every _reload_interval seconds if changed."""
-    global TAGS_SCHEMA, _last_reload, _last_mtime
-    now = time.time()
-    if now - _last_reload < _reload_interval:
-        return
-    try:
-        mtime = os.path.getmtime(path)
-    except FileNotFoundError:
-        return
-    if _last_mtime is None or mtime != _last_mtime:
-        try:
-            TAGS_SCHEMA = load_tags_schema(path)
-            _last_mtime = mtime
-            print(f"[Auto-reload] tags.json reloaded at {time.ctime(mtime)}")
-        except Exception as e:
-            print(f"[Auto-reload] Failed to reload schema: {e}")
-    _last_reload = now
-
-# ==============================
-# Tag utilities
-# ==============================
-def ensure_schema_keys_for_discovered_tags(discovered: set):
-    for key in sorted(discovered):
-        if key in TAGS_SCHEMA:
-            continue
-        group = key.split(".", 1)[0] if "." in key else "misc"
-        TAGS_SCHEMA[key] = {
-            "group": group or "misc",
-            "prompt": key.replace("_", " "),
-            "syn": [],
-        }
-
-def synonym_to_keys(token: str, schema: dict):
-    t = token.lower().strip()
-    matches = set()
-    for key, meta in schema.items():
-        if t == key.lower() or t in meta.get("syn", []):
-            matches.add(key)
-    if not matches:
-        for key in schema.keys():
-            if t in key.lower():
-                matches.add(key)
-    return matches
-
-def expand_tokens(tokens, schema):
-    expanded = set()
-    for t in (tokens or []):
-        if not t:
-            continue
-        expanded |= synonym_to_keys(t, schema)
-    return expanded
-
-def build_prompt(tag_keys, schema):
-    order = ["shape", "system", "material", "scale", "context", "style", "lighting", "camera"]
-    first_by_group = {}
-    for key in (tag_keys or []):
-        meta = schema.get(key)
-        if not meta:
-            continue
-        g = meta.get("group", "misc")
-        if g not in first_by_group:
-            first_by_group[g] = meta.get("prompt", key.replace("_", " "))
-    phrases = [first_by_group[g] for g in order if g in first_by_group]
-    if "scale" not in first_by_group:
-        phrases.append("open-air pavilion")
-    phrases.append("high-detail, photorealistic, architectural visualization")
-    return ", ".join(phrases)
-
-def search_images(images, schema, req_tags=None, any_tags=None, q: str = ""):
-    req = expand_tokens(req_tags, schema)
-    any_ = expand_tokens(any_tags, schema)
-    q = (q or "").lower().strip()
-    def match(img):
-        tagset = set(img.get("tags", []))
-        if req and not req.issubset(tagset):
-            return False
-        if any_ and not (tagset & any_):
-            return False
-        if q:
-            hay = (img.get("id","") + " " + img.get("title","") + " " + " ".join(img.get("tags", []))).lower()
-            if q not in hay:
-                return False
-        return True
-    return [img for img in images if match(img)]
-
-# ==============================
-# GitHub list/walk
-# ==============================
-def gh_list(path):
+def gh_list(path: str):
+    """List files/folders at a GitHub path using the Contents API."""
     base = f"https://api.github.com/repos/{OWNER}/{REPO}"
     suffix = f"/contents/{path}" if path else "/contents"
     url = f"{base}{suffix}?ref={BRANCH}"
@@ -180,7 +107,19 @@ def gh_list(path):
     r.raise_for_status()
     return r.json()
 
-def walk_images(path):
+
+def walk_images(path: str):
+    """
+    Recursively walk BASE_PATH in the GitHub repo and yield image items with tags.
+
+    Each item:
+      {
+        "id": "...",      # short SHA
+        "url": "https://raw.githubusercontent.com/...",
+        "title": "filename.jpg",
+        "tags": ["geometry.hypar", "environment.resort", ...]
+      }
+    """
     stack = [path]
     while stack:
         cur = stack.pop()
@@ -189,9 +128,11 @@ def walk_images(path):
             for it in items:
                 if it["type"] == "dir":
                     stack.append(it["path"])
-                elif it["type"] == "file" and it["name"].lower().endswith((".jpg",".jpeg",".png",".gif",".webp")):
-                    rel = it["path"][len(BASE_PATH):].strip("/")
-                    raw_parts = rel.split("/")[:-1]
+                elif it["type"] == "file" and it["name"].lower().endswith(
+                    (".jpg", ".jpeg", ".png", ".gif", ".webp")
+                ):
+                    rel = it["path"][len(BASE_PATH):].strip("/")  # e.g. "geometry/hypar/file.jpg"
+                    raw_parts = rel.split("/")[:-1]               # folder names only
                     tags = canonicalize_parts(raw_parts)
                     yield {
                         "id": it["sha"][:8],
@@ -200,139 +141,111 @@ def walk_images(path):
                         "tags": [t for t in tags if t],
                     }
 
-def list_all_images(limit: int = 8, required_tags=None, q: str = ""):
-    required = set((required_tags or []))
+
+def list_all_images(limit: int = 8, any_tags=None, q: str = ""):
+    """
+    Return up to `limit` images.
+
+    - any_tags: list of canonical tag strings; image must match AT LEAST ONE of them (OR logic).
+    - q: optional text filter that searches in title and tag strings.
+    """
+    any_set = set(any_tags or [])
+    q = (q or "").lower().strip()
+
     results = []
     for item in walk_images(BASE_PATH):
-        if required and not required.issubset(set(item["tags"])):
+        tagset = set(item.get("tags", []))
+
+        # OR tag filter: if tags requested, must share at least one
+        if any_set and not (tagset & any_set):
             continue
+
+        # q filter: substring in title or tags
         if q:
-            ql = q.lower()
-            if (ql not in item["title"].lower() and all(ql not in t.lower() for t in item["tags"])):
+            hay = (item.get("title", "") + " " + " ".join(tagset)).lower()
+            if q not in hay:
                 continue
+
         results.append(item)
         if len(results) >= limit:
             break
+
     return results
+
 
 # ==============================
 # Routes
 # ==============================
 @app.get("/")
 def home():
-    return "Bamboo Image API (Render/Railway)"
+    return "Bamboo Image API – returns images + canonical tags for your GPT."
+
 
 @app.get("/images")
 def list_images():
+    """
+    GET /images?tags=geometry.hypar,environment.forest&q=pavilion&limit=6
+
+    - tags: comma-separated list of canonical tags; image must match ANY of them (OR).
+    - q: optional keyword filter (matches in filename or tag strings).
+    - limit: max number of images to return (default 8).
+    """
     tag_str = request.args.get("tags", "").strip()
     q = request.args.get("q", "").strip()
     limit = int(request.args.get("limit", 8))
-    want_tags = [t.strip() for t in tag_str.split(",") if t.strip()]
-    items = list_all_images(limit=limit, required_tags=want_tags, q=q)
+
+    any_tags = [t.strip() for t in tag_str.split(",") if t.strip()]
+    items = list_all_images(limit=limit, any_tags=any_tags, q=q)
     return jsonify({"count": len(items), "items": items})
+
 
 @app.get("/tags")
 def list_tags():
-    maybe_reload_schema()
-    discovered = set()
-    for item in list_all_images(limit=10_000):
-        for t in item["tags"]:
-            discovered.add(t)
-    ensure_schema_keys_for_discovered_tags(discovered)
-    out = [{"key": k, **v} for k, v in sorted(TAGS_SCHEMA.items(), key=lambda kv: kv[0])]
-    return jsonify({"tags": out})
+    """
+    GET /tags
 
-@app.get("/search")
-def search():
-    maybe_reload_schema()
-    tags_param = request.args.get("tags", "")
-    any_param  = request.args.get("any", "")
-    q          = request.args.get("q", "")
-    limit      = int(request.args.get("limit", 12))
-    req_tags = [t.strip() for t in tags_param.split(",") if t.strip()]
-    any_tags = [t.strip() for t in any_param.split(",") if t.strip()]
+    Returns all discovered canonical tags from the image library.
+    Useful for your GPT to learn what tags exist.
+    """
     images = list_all_images(limit=10_000)
-    discovered = {t for img in images for t in img["tags"]}
-    ensure_schema_keys_for_discovered_tags(discovered)
-    results = search_images(images, TAGS_SCHEMA, req_tags=req_tags, any_tags=any_tags, q=q)
-    return jsonify({"count": len(results[:limit]), "results": results[:limit]})
+    tagset = set()
+    for img in images:
+        for t in img.get("tags", []):
+            tagset.add(t)
 
-@app.get("/prompt")
-def prompt_from_tags():
-    maybe_reload_schema()
-    tags_param = request.args.get("tags", "").strip()
-    image_id   = request.args.get("id", "").strip()
-    if image_id:
-        imgs = list_all_images(limit=10_000)
-        tag_keys = []
-        for img in imgs:
-            if img["id"] == image_id:
-                tag_keys = img.get("tags", [])
-                break
-        if not tag_keys:
-            return jsonify({"error": f"Image id '{image_id}' not found"}), 404
-    else:
-        tag_keys = [t.strip() for t in tags_param.split(",") if t.strip()]
-        if not tag_keys:
-            return jsonify({"error": "Provide ?tags=... or ?id=<image_id>"}), 400
-    ensure_schema_keys_for_discovered_tags(set(tag_keys))
-    prompt = build_prompt(tag_keys, TAGS_SCHEMA)
-    return jsonify({"tags": tag_keys, "prompt": prompt})
+    return jsonify({"count": len(tagset), "tags": sorted(tagset)})
 
-@app.post("/generate")
-def generate_image():
-    data = request.get_json(force=True) or {}
-    prompt = (data.get("prompt") or "").strip()
-    size = (data.get("size") or "1024x1024").strip()
-    if not prompt:
-        return jsonify({"error": "Missing 'prompt'"}), 400
+
+@app.get("/health")
+def health():
+    """
+    Simple health check:
+    - tests access to the GitHub repo path
+    """
+    gh_ok, gh_msg = True, "ok"
     try:
-        r = requests.post(
-            "https://api.openai.com/v1/images/generations",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={"model": "gpt-image-1", "prompt": prompt, "size": size, "n": 1},
-            timeout=90,
-        )
-        r.raise_for_status()
-        b64 = r.json()["data"][0]["b64_json"]
-        return jsonify({"b64": b64, "size": size})
-    except requests.HTTPError as e:
-        return jsonify({"error": f"OpenAI HTTP {e.response.status_code}: {e.response.text}"}), 502
+        _ = gh_list(BASE_PATH)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        gh_ok, gh_msg = False, str(e)
+
+    status = "ok" if gh_ok else "degraded"
+    return jsonify({
+        "status": status,
+        "github": {"ok": gh_ok, "detail": gh_msg},
+    })
+
 
 @app.get("/openapi.yaml")
 def openapi_spec():
+    """
+    Serve the OpenAPI spec so your Custom GPT Actions can discover this API.
+    """
     path = os.path.join(os.path.dirname(__file__), "openapi.yaml")
     if not os.path.exists(path):
         return jsonify({"error": "openapi.yaml not found"}), 404
     with open(path, "r", encoding="utf-8") as f:
         return app.response_class(f.read(), mimetype="text/yaml")
 
-@app.get("/health")
-def health():
-    # ensure latest tags.json (auto-reload)
-    maybe_reload_schema()
-
-    # Check GitHub access to your repo path
-    gh_ok, gh_msg = True, "ok"
-    try:
-        _ = gh_list(BASE_PATH)   # uses your existing GitHub helper
-    except Exception as e:
-        gh_ok, gh_msg = False, str(e)
-
-    # Check OpenAI key presence (don't expose the key!)
-    oa_ok = bool(OPENAI_API_KEY)
-
-    status = "ok" if (gh_ok and oa_ok) else "degraded"
-    return jsonify({
-        "status": status,
-        "github": {"ok": gh_ok, "detail": gh_msg},
-        "openai_key": {"ok": oa_ok}
-    })
 
 # ==============================
 # Entry Point
