@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests, os, json
+import hashlib, random
 
 # ==============================
 # Basic Config
@@ -36,11 +37,15 @@ def load_annotations(path: str = ANNOTATIONS_PATH):
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Ensure values are always lists
+        # Ensure values are always lists of cleaned strings
         norm = {}
         for fname, tags in data.items():
             if isinstance(tags, list):
-                norm[fname] = [str(t).strip() for t in tags if str(t).strip()]
+                cleaned = [str(t).strip() for t in tags if str(t).strip()]
+            else:
+                cleaned = [str(tags).strip()] if str(tags).strip() else []
+            if cleaned:
+                norm[fname] = cleaned
         return norm
     except Exception as e:
         print(f"[WARN] Failed to load {path}: {e}")
@@ -98,6 +103,7 @@ def canonicalize_parts(parts):
         tags.append(f"{category}.{p}")
     return tags
 
+
 def walk_images(path: str):
     """
     Recursively walk the BASE_PATH in GitHub and yield image items
@@ -134,6 +140,7 @@ def walk_images(path: str):
                         "tags": all_tags,
                     }
 
+
 def list_all_images(limit: int = 1000):
     """
     Collect up to `limit` images from the repo with their tags.
@@ -145,12 +152,107 @@ def list_all_images(limit: int = 1000):
             break
     return results
 
+
+def build_tag_families(images):
+    """
+    Group tags by their family prefix before the first dot.
+    e.g. "program.pavilion" -> family "program"
+    Returns: {"program": {"program.pavilion", "program.bridge", ...}, ...}
+    """
+    families = {}
+    for img in images:
+        for t in img.get("tags", []):
+            if "." in t:
+                family, _ = t.split(".", 1)
+            else:
+                family = "misc"
+            families.setdefault(family, set()).add(t)
+    return families
+
+
+def index_tag_images(images):
+    """
+    Build an index: tag -> list of images that have this tag.
+    """
+    tag_index = {}
+    for img in images:
+        for t in img.get("tags", []):
+            tag_index.setdefault(t, []).append(img)
+    return tag_index
+
+
+def get_rng_for_user(user_key: str, family: str) -> random.Random:
+    """
+    Build a deterministic RNG based on user_key + family.
+    Different users -> different sequences.
+    Same user + same family -> same sequence.
+    """
+    base = f"{user_key}:{family}"
+    h = hashlib.md5(base.encode("utf-8")).hexdigest()
+    seed = int(h, 16) % (2**32)
+    return random.Random(seed)
+
+
+def pick_options_for_family(family: str, tag_index: dict, limit: int = 3, user_key: str = ""):
+    """
+    For a given family (e.g. 'program'), pick up to `limit` options.
+    Each option = (tag + one representative image).
+    Filenames will NOT repeat.
+
+    If user_key is provided, the selection is randomized per user.
+    """
+    prefix = f"{family}."
+    family_tags = [t for t in tag_index.keys() if t.startswith(prefix)]
+
+    if not family_tags:
+        return []
+
+    rng = get_rng_for_user(user_key or "default", family)
+
+    # Randomize order of tags for this user
+    rng.shuffle(family_tags)
+
+    used_filenames = set()
+    options = []
+
+    for tag in family_tags:
+        imgs = tag_index[tag][:]  # copy list
+        # Randomize images for this tag too
+        rng.shuffle(imgs)
+
+        chosen_img = None
+        for img in imgs:
+            fname = img.get("title") or img.get("filename") or ""
+            if fname and fname not in used_filenames:
+                chosen_img = img
+                used_filenames.add(fname)
+                break
+
+        if chosen_img is None:
+            continue
+
+        options.append({
+            "tag": tag,
+            "image": {
+                "id": chosen_img["id"],
+                "url": img["url"],
+                "title": img["title"],
+                "tags": img.get("tags", []),
+            }
+        })
+
+        if len(options) >= limit:
+            break
+
+    return options
+
 # ==============================
 # Routes
 # ==============================
 @app.get("/")
 def home():
     return "Hi marjo! Welcome back to Bamboo Image API (images + tags)"
+
 
 @app.get("/images")
 def list_images():
@@ -195,6 +297,7 @@ def list_images():
 
     return jsonify({"count": len(results), "items": results})
 
+
 @app.get("/tags")
 def list_tags():
     """
@@ -206,6 +309,56 @@ def list_tags():
         for t in img.get("tags", []):
             all_tags.add(t)
     return jsonify({"count": len(all_tags), "tags": sorted(all_tags)})
+
+
+@app.get("/options")
+def list_family_options():
+    """
+    Suggest options for a tag family.
+
+    Query params:
+      - family: e.g. "program", "bamboo", "system", "environment"
+      - limit : max number of options (default 3)
+      - user  : arbitrary user identifier for per-user randomness
+
+    Response:
+      {
+        "family": "program",
+        "user": "u123",
+        "count": 3,
+        "options": [
+          {
+            "tag": "program.pavilion",
+            "image": { "id": "...", "url": "...", "title": "...", "tags": [...] }
+          },
+          ...
+        ]
+      }
+    """
+    family = request.args.get("family", "").strip()
+    limit = int(request.args.get("limit", 3))
+    user_key = request.args.get("user", "").strip()
+
+    if not family:
+        return jsonify({"error": "family query param is required"}), 400
+
+    images = list_all_images(limit=10_000)
+    tag_index = index_tag_images(images)
+
+    options = pick_options_for_family(
+        family=family,
+        tag_index=tag_index,
+        limit=limit,
+        user_key=user_key,
+    )
+
+    return jsonify({
+        "family": family,
+        "user": user_key or None,
+        "count": len(options),
+        "options": options
+    })
+
 
 @app.get("/health")
 def health():
@@ -227,6 +380,7 @@ def health():
         "github": {"ok": gh_ok, "detail": gh_msg},
         "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH}
     })
+
 
 # ==============================
 # Entry Point (local dev)
