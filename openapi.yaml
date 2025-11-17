@@ -2,77 +2,39 @@ openapi: 3.1.0
 info:
   title: Bamboo Images API
   version: "1.0.0"
-  description: |
-    API for accessing bamboo image datasets, tag schema, and DALL·E-based image generation.
-    Designed for integration with the BambooNation Custom GPT.
+  description: Simple API for listing bamboo images and tags for a Custom GPT.
+
 servers:
   - url: https://bamboo-images.onrender.com
+
 paths:
-  /:
-    get:
-      operationId: root
-      summary: API home route
-      responses:
-        "200":
-          description: Basic server status message
-
-  /tags:
-    get:
-      operationId: listTags
-      summary: Get the effective tag schema (tags.json + auto-discovered folders)
-      responses:
-        "200":
-          description: List of available tags
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  tags:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        key:
-                          type: string
-                          example: "scale.pavilion"
-                        group:
-                          type: string
-                          example: "scale"
-                        prompt:
-                          type: string
-                          example: "open-air pavilion"
-                        syn:
-                          type: array
-                          items:
-                            type: string
-
   /images:
     get:
       operationId: listImages
-      summary: List all available images from GitHub
+      description: Return images from the library filtered by tags or keyword.
       parameters:
-        - in: query
-          name: tags
+        - name: tags
+          in: query
+          required: false
+          description: Comma-separated tags that all must be present on an image.
           schema:
             type: string
-          description: Comma-separated canonical tags (e.g., scale.pavilion,program.resort)
-        - in: query
-          name: q
+        - name: q
+          in: query
+          required: false
+          description: Free-text search over title and tags.
           schema:
             type: string
-          description: Free-text query across title and tags
-        - in: query
-          name: limit
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of images to return.
           schema:
             type: integer
             default: 8
-            minimum: 1
-            maximum: 100
-          description: Number of items to return
       responses:
         "200":
-          description: List of images with tags
+          description: A list of images.
           content:
             application/json:
               schema:
@@ -83,53 +45,41 @@ paths:
                   items:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id:
-                          type: string
-                          example: "b7c3d9a2"
-                        url:
-                          type: string
-                          format: uri
-                          example: "https://raw.githubusercontent.com/marjjo/bamboo_images/main/images/precedents/pavilion/example.jpg"
-                        title:
-                          type: string
-                        tags:
-                          type: array
-                          items:
-                            type: string
+                      $ref: "#/components/schemas/ImageItem"
 
   /search:
     get:
       operationId: searchImages
-      summary: Search images using tags or text
+      description: Advanced search using required tags, optional tags, and keyword.
       parameters:
-        - in: query
-          name: tags
+        - name: tags
+          in: query
+          required: false
+          description: Comma-separated tags that must all be present.
           schema:
             type: string
-          description: Comma-separated REQUIRED tags (must all match)
-        - in: query
-          name: any
+        - name: any
+          in: query
+          required: false
+          description: Comma-separated tags where at least one should match.
           schema:
             type: string
-          description: Comma-separated OPTIONAL tags (match ANY)
-        - in: query
-          name: q
+        - name: q
+          in: query
+          required: false
+          description: Free-text keyword against id, title, and tags.
           schema:
             type: string
-          description: Free-text search over id, title, and tag keys
-        - in: query
-          name: limit
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of images to return.
           schema:
             type: integer
             default: 12
-            minimum: 1
-            maximum: 100
-          description: Maximum number of results
       responses:
         "200":
-          description: Search results
+          description: Search results.
           content:
             application/json:
               schema:
@@ -140,38 +90,15 @@ paths:
                   results:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id:
-                          type: string
-                        url:
-                          type: string
-                          format: uri
-                        title:
-                          type: string
-                        tags:
-                          type: array
-                          items:
-                            type: string
+                      $ref: "#/components/schemas/ImageItem"
 
-  /prompt:
+  /tags:
     get:
-      operationId: buildPrompt
-      summary: Build a DALL·E-ready prompt from tags or an image id
-      parameters:
-        - in: query
-          name: tags
-          schema:
-            type: string
-          description: Comma-separated canonical tags (e.g., material.bamboo,scale.pavilion)
-        - in: query
-          name: id
-          schema:
-            type: string
-          description: Use an existing image ID to extract its tags
+      operationId: listTags
+      description: List all known canonical tags and their metadata.
       responses:
         "200":
-          description: Prompt generated from tags
+          description: Known tags and their groups.
           content:
             application/json:
               schema:
@@ -180,45 +107,74 @@ paths:
                   tags:
                     type: array
                     items:
-                      type: string
-                  prompt:
-                    type: string
-                    example: >
-                      constructed from natural bamboo canes, open-air pavilion, contemporary tropical architecture,
-                      lush tropical setting, high-detail, photorealistic, architectural visualization
+                      $ref: "#/components/schemas/TagMeta"
 
-  /generate:
-    post:
-      operationId: generateImage
-      summary: Generate a DALL·E image from a prompt
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [prompt]
-              properties:
-                prompt:
-                  type: string
-                  example: >
-                    open-air pavilion in natural bamboo, contemporary tropical architecture, lush tropical setting,
-                    high-detail, photorealistic, architectural visualization
-                size:
-                  type: string
-                  default: "1024x1024"
-                  enum: ["256x256", "512x512", "1024x1024", "2048x2048"]
+  /health:
+    get:
+      operationId: healthCheck
+      description: Simple health check for the Bamboo Images API.
       responses:
         "200":
-          description: Base64-encoded image result
+          description: Health status of the API.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  b64:
-                    type: string
-                    description: Base64-encoded image data
-                  size:
-                    type: string
-                    example: "1024x1024"
+                $ref: "#/components/schemas/HealthStatus"
+
+components:
+  schemas:
+    ImageItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Short identifier derived from the image SHA.
+        url:
+          type: string
+          format: uri
+          description: Public URL of the image file.
+        title:
+          type: string
+          description: File name or human-readable title.
+        tags:
+          type: array
+          description: Canonical tag keys associated with the image.
+          items:
+            type: string
+
+    TagMeta:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Canonical tag key.
+        group:
+          type: string
+          description: Tag group such as shape, system, material, etc.
+        prompt:
+          type: string
+          description: Human-readable phrase for use in prompts.
+        syn:
+          type: array
+          description: Known synonyms or loose matches for this tag.
+          items:
+            type: string
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          description: Overall status string such as ok or degraded.
+        github:
+          type: object
+          properties:
+            ok:
+              type: boolean
+            detail:
+              type: string
+        openai_key:
+          type: object
+          properties:
+            ok:
+              type: boolean

@@ -150,7 +150,7 @@ def list_all_images(limit: int = 1000):
 # ==============================
 @app.get("/")
 def home():
-    return "Bamboo Image API (images + tags)"
+    return "Hi marjo! Welcome back to Bamboo Image API (images + tags)"
 
 @app.get("/images")
 def list_images():
