@@ -26,27 +26,41 @@ CORS(app)
 def load_annotations(path: str = ANNOTATIONS_PATH):
     """
     Load extra tags for images from annotations.json.
-    Expected format:
-    {
-      "filename.jpg": ["geometry.hypar", "environment.resort", ...],
-      ...
-    }
+
+    Accepted formats:
+    1) "file.jpg": ["tag.one", "tag.two"]
+    2) "file.jpg": {"tags": ["tag.one", "tag.two"]}
     """
     if not os.path.exists(path):
         return {}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        # Ensure values are always lists of cleaned strings
+
         norm = {}
-        for fname, tags in data.items():
-            if isinstance(tags, list):
-                cleaned = [str(t).strip() for t in tags if str(t).strip()]
+        for fname, meta in data.items():
+            # 1) If it's a dict, expect {"tags": [...]}
+            if isinstance(meta, dict):
+                tags_raw = meta.get("tags", [])
             else:
-                cleaned = [str(tags).strip()] if str(tags).strip() else []
+                tags_raw = meta
+
+            # 2) Normalize to list
+            if not isinstance(tags_raw, list):
+                tags_raw = [tags_raw]
+
+            # 3) Clean strings and drop empty values
+            cleaned = [
+                str(t).strip()
+                for t in tags_raw
+                if str(t).strip()
+            ]
+
             if cleaned:
                 norm[fname] = cleaned
+
         return norm
+
     except Exception as e:
         print(f"[WARN] Failed to load {path}: {e}")
         return {}
@@ -235,9 +249,9 @@ def pick_options_for_family(family: str, tag_index: dict, limit: int = 3, user_k
             "tag": tag,
             "image": {
                 "id": chosen_img["id"],
-                "url": img["url"],
-                "title": img["title"],
-                "tags": img.get("tags", []),
+                "url": chosen_img["url"],
+                "title": chosen_img["title"],
+                "tags": chosen_img.get("tags", []),
             }
         })
 
@@ -320,20 +334,6 @@ def list_family_options():
       - family: e.g. "program", "bamboo", "system", "environment"
       - limit : max number of options (default 3)
       - user  : arbitrary user identifier for per-user randomness
-
-    Response:
-      {
-        "family": "program",
-        "user": "u123",
-        "count": 3,
-        "options": [
-          {
-            "tag": "program.pavilion",
-            "image": { "id": "...", "url": "...", "title": "...", "tags": [...] }
-          },
-          ...
-        ]
-      }
     """
     family = request.args.get("family", "").strip()
     limit = int(request.args.get("limit", 3))
