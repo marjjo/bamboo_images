@@ -3,8 +3,13 @@ from flask_cors import CORS
 import os, json, hashlib, random, base64
 import requests
 
-# NEW: OpenAI client (only used for image generation via gpt-image-1-mini)
-from openai import OpenAI  # NEW
+# NEW: for safe temp files and URL parsing
+import tempfile  # NEW
+from urllib.parse import urlparse  # NEW
+from typing import Optional, List  # NEW
+
+# OpenAI client
+from openai import OpenAI
 
 # ==============================
 # Basic Config
@@ -17,16 +22,24 @@ BASE_PATH = "images"
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ANNOTATIONS_PATH = os.getenv("ANNOTATIONS_PATH", "annotations.json")
 
-# NEW: OpenAI config
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # NEW
-OPENAI_IMAGE_MODEL = "gpt-image-1-mini"       # NEW: force mini, no gpt-image-1 anywhere
-MAX_REFERENCE_IMAGES = 4                      # NEW: keep references bounded for stability
+# CHANGED: model config -> gpt-image-1 only
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_IMAGE_MODEL = "gpt-image-1"  # CHANGED (was gpt-image-1-mini)
+MAX_REFERENCE_IMAGES = 4            # unchanged
+
+# NEW: allowlist to prevent SSRF; default allows GitHub raw + user-images
+ALLOWED_REF_HOSTS = set(
+    h.strip().lower()
+    for h in (os.getenv("ALLOWED_REF_HOSTS", "raw.githubusercontent.com,githubusercontent.com").split(","))
+    if h.strip()
+)  # NEW
+
+MAX_IMAGE_BYTES = 50 * 1024 * 1024  # NEW: 50MB per image (matches gpt-image-1 limits)
 
 app = Flask(__name__)
 CORS(app)
 
-# NEW: initialize OpenAI client once
-_openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None  # NEW
+_openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 # ==============================
@@ -216,59 +229,84 @@ def pick_options_for_family(family: str, tag_index: dict, limit: int = 3, user_k
 
 
 # ==============================
-# NEW: Image generation (ONLY gpt-image-1-mini)
+# CHANGED: Image generation (gpt-image-1 only)
 # ==============================
-def _extract_first_image_b64(response_obj) -> str | None:
+# REMOVED: _extract_first_image_b64 + Responses API tool parsing
+
+def _validate_ref_url(url: str) -> None:  # NEW
+    u = urlparse(url)
+    if u.scheme != "https":
+        raise ValueError("Reference URL must be https.")
+    host = (u.hostname or "").lower()
+    if not host:
+        raise ValueError("Reference URL has no hostname.")
+    if host not in ALLOWED_REF_HOSTS:
+        raise ValueError(f"Reference host not allowed: {host}")
+
+
+def _download_to_temp_image(url: str):  # NEW
     """
-    Tries to pull base64 image output from the Responses API result.
-    The docs indicate image_generation_call results include a base64-encoded image. :contentReference[oaicite:3]{index=3}
+    Download an image URL to a temp file and return (file_obj, path, content_type).
+    Enforces: https + host allowlist + <50MB + image/*.
     """
-    if not response_obj:
-        return None
+    _validate_ref_url(url)
 
-    output = getattr(response_obj, "output", None) or response_obj.get("output", [])
-    if not output:
-        return None
+    r = requests.get(url, stream=True, timeout=20)
+    r.raise_for_status()
 
-    # Normalize output items into dicts
-    norm_items = []
-    for item in output:
-        if isinstance(item, dict):
-            norm_items.append(item)
-        else:
-            # OpenAI SDK objects often have model_dump()
-            md = getattr(item, "model_dump", None)
-            norm_items.append(md() if callable(md) else {})
+    ctype = (r.headers.get("content-type") or "").lower()
+    if not ctype.startswith("image/"):
+        raise ValueError(f"Reference is not an image (content-type={ctype}).")
 
-    # Look for image generation call
-    for item in norm_items:
-        t = item.get("type")
-        if t == "image_generation_call":
-            # most common patterns observed in docs/snippets:
-            # - item["result"] is base64 string
-            # - item["result"]["b64_json"]
-            res = item.get("result")
-            if isinstance(res, str) and res.strip():
-                return res.strip()
-            if isinstance(res, dict):
-                b64 = res.get("b64_json") or res.get("image_base64") or res.get("b64")
-                if isinstance(b64, str) and b64.strip():
-                    return b64.strip()
+    # Pick a safe suffix
+    if "png" in ctype:
+        suffix = ".png"
+    elif "jpeg" in ctype or "jpg" in ctype:
+        suffix = ".jpg"
+    elif "webp" in ctype:
+        suffix = ".webp"
+    else:
+        suffix = ".img"
 
-    # Fallback: sometimes output contains direct image items
-    for item in norm_items:
-        if item.get("type") in ("output_image", "image"):
-            b64 = item.get("b64_json") or item.get("image_base64") or item.get("b64")
-            if isinstance(b64, str) and b64.strip():
-                return b64.strip()
+    tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)  # we delete manually
+    bytes_written = 0
+    try:
+        for chunk in r.iter_content(chunk_size=1024 * 64):
+            if not chunk:
+                continue
+            bytes_written += len(chunk)
+            if bytes_written > MAX_IMAGE_BYTES:
+                raise ValueError("Reference image too large (>50MB).")
+            tf.write(chunk)
+        tf.flush()
+        tf.close()
 
-    return None
+        f = open(tf.name, "rb")
+        return f, tf.name, ctype
+    except Exception:
+        try:
+            tf.close()
+        except Exception:
+            pass
+        try:
+            os.unlink(tf.name)
+        except Exception:
+            pass
+        raise
 
 
-def generate_with_visual_references(prompt: str, reference_urls: list[str] | None = None, size: str | None = None):
+def generate_with_visual_references(
+    prompt: str,
+    reference_urls: Optional[List[str]] = None,
+    size: Optional[str] = None,
+    quality: Optional[str] = None,
+    output_format: Optional[str] = None,
+):
     """
-    Generates an image using ONLY `gpt-image-1-mini`, optionally with image URLs as references.
-    Uses Responses API image_generation tool which supports optional image inputs. :contentReference[oaicite:4]{index=4}
+    CHANGED: Uses OpenAI Images API with model=gpt-image-1.
+    - If reference_urls provided -> client.images.edit(image=[...], prompt=...)
+    - Else -> client.images.generate(prompt=...)
+    Returns base64 (b64_json).
     """
     if not _openai_client:
         raise RuntimeError("OPENAI_API_KEY is missing on the server environment.")
@@ -276,29 +314,56 @@ def generate_with_visual_references(prompt: str, reference_urls: list[str] | Non
     reference_urls = reference_urls or []
     reference_urls = [u for u in reference_urls if isinstance(u, str) and u.strip()][:MAX_REFERENCE_IMAGES]
 
-    # We put size into text to avoid relying on undocumented tool args shape.
-    # (You can still pass "size" in JSON to influence the instruction.)
-    size_line = f"Output size preference: {size}." if size else "Output size preference: 1024x1024."
+    size = size or "1024x1024"
+    # quality can be: "low", "medium", "high", "auto" (optional)
+    # output_format: "png" | "jpeg" | "webp" (optional; gpt-image-1 supports it)
 
-    content = [
-        {"type": "input_text", "text": f"{prompt}\n{size_line}\nUse the provided reference images as visual inspiration and stay structurally plausible."}
-    ]
+    # Defaults
+    quality = quality or "auto"
+    output_format = output_format or "png"
 
-    # Add each reference image as an input_image
-    for url in reference_urls:
-        content.append({"type": "input_image", "image_url": url})
+    if reference_urls:
+        # Download references to temp files
+        files = []
+        paths = []
+        try:
+            for url in reference_urls:
+                f, path, _ctype = _download_to_temp_image(url)
+                files.append(f)
+                paths.append(path)
 
-    resp = _openai_client.responses.create(
-        model=OPENAI_IMAGE_MODEL,                # NEW: always gpt-image-1-mini
-        input=[{"role": "user", "content": content}],
-        tools=[{"type": "image_generation"}],    # NEW: tool-based image generation (supports image inputs)
-    )
+            result = _openai_client.images.edit(
+                model=OPENAI_IMAGE_MODEL,      # CHANGED: gpt-image-1
+                image=files,                  # CHANGED: direct visual references
+                prompt=prompt,
+                size=size,
+                quality=quality,
+                output_format=output_format,
+            )
+            b64 = result.data[0].b64_json
+            return b64, output_format
 
-    b64 = _extract_first_image_b64(resp)
-    if not b64:
-        raise RuntimeError("No image returned from OpenAI response.")
-
-    return b64
+        finally:
+            for f in files:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+            for p in paths:
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
+    else:
+        result = _openai_client.images.generate(
+            model=OPENAI_IMAGE_MODEL,          # CHANGED: gpt-image-1
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            output_format=output_format,
+        )
+        b64 = result.data[0].b64_json
+        return b64, output_format
 
 
 # ==============================
@@ -306,18 +371,18 @@ def generate_with_visual_references(prompt: str, reference_urls: list[str] | Non
 # ==============================
 @app.get("/")
 def home():
-    return "Hi marjo! Welcome back to Bamboo Image API (images + tags + gpt-image-1-mini generation)"
+    return "Hi marjo! Welcome back to Bamboo Image API (images + tags + gpt-image-1 generation)"  # CHANGED
 
 
 @app.get("/images")
 def list_images():
     tags_param = request.args.get("tags", "").strip()
-    any_param  = request.args.get("any", "").strip()
-    q          = request.args.get("q", "").strip().lower()
-    limit      = int(request.args.get("limit", 8))
+    any_param = request.args.get("any", "").strip()
+    q = request.args.get("q", "").strip().lower()
+    limit = int(request.args.get("limit", 8))
 
     required_tags = {t.strip() for t in tags_param.split(",") if t.strip()}
-    any_tags      = {t.strip() for t in any_param.split(",") if t.strip()}
+    any_tags = {t.strip() for t in any_param.split(",") if t.strip()}
 
     images = list_all_images(limit=10_000)
     results = []
@@ -383,8 +448,6 @@ def health():
         gh_ok, gh_msg = False, str(e)
 
     ann_ok = bool(ANNOTATIONS) or os.path.exists(ANNOTATIONS_PATH)
-
-    # NEW: OpenAI health (key presence only; don't make paid calls here)
     openai_ok = bool(OPENAI_API_KEY)
 
     status = "ok" if (gh_ok and openai_ok) else "degraded"
@@ -393,26 +456,32 @@ def health():
         "status": status,
         "github": {"ok": gh_ok, "detail": gh_msg},
         "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH},
-        "openai": {"ok": openai_ok, "model": OPENAI_IMAGE_MODEL},
+        "openai": {"ok": openai_ok, "model": OPENAI_IMAGE_MODEL},  # CHANGED
+        "refs": {
+            "max_reference_images": MAX_REFERENCE_IMAGES,
+            "allowed_ref_hosts": sorted(ALLOWED_REF_HOSTS),
+        }
     })
 
 
-# NEW: main generation endpoint for your Custom GPT Action
 @app.post("/generate")
 def generate():
     """
     JSON body:
       {
-        "prompt": "Render a bamboo hypar pavilion...",
-        "reference_urls": ["https://.../img1.jpg", "https://.../img2.jpg"],
-        "size": "1024x1024"
+        "prompt": "Render a conceptual bamboo hypar pavilion ...",
+        "reference_urls": ["https://raw.githubusercontent.com/.../a.jpg", "..."],
+        "size": "1024x1024",
+        "quality": "medium",
+        "output_format": "png"
       }
 
     Returns:
       {
-        "model": "gpt-image-1-mini",
-        "b64_png": "<base64...>",
-        "data_url": "data:image/png;base64,..."
+        "model": "gpt-image-1",
+        "b64_image": "<base64...>",
+        "data_url": "data:image/png;base64,...",
+        "reference_count": 2
       }
     """
     payload = request.get_json(silent=True) or {}
@@ -422,14 +491,24 @@ def generate():
 
     reference_urls = payload.get("reference_urls") or payload.get("ref_urls") or []
     size = (payload.get("size") or "").strip() or None
+    quality = (payload.get("quality") or "").strip() or None
+    output_format = (payload.get("output_format") or "").strip() or None
 
     try:
-        b64 = generate_with_visual_references(prompt=prompt, reference_urls=reference_urls, size=size)
+        b64, fmt = generate_with_visual_references(
+            prompt=prompt,
+            reference_urls=reference_urls,
+            size=size,
+            quality=quality,
+            output_format=output_format,
+        )
+        mime = "image/png" if (fmt or "").lower() == "png" else ("image/jpeg" if (fmt or "").lower() in ("jpg", "jpeg") else "image/webp")
         return jsonify({
             "model": OPENAI_IMAGE_MODEL,
-            "b64_png": b64,
-            "data_url": f"data:image/png;base64,{b64}",
+            "b64_image": b64,  # CHANGED key name (more general than b64_png)
+            "data_url": f"data:{mime};base64,{b64}",
             "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
+            "output_format": fmt,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
