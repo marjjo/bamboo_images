@@ -1,47 +1,420 @@
 {
-  "structure_system.hypar": {
-    "group": "structure_system",
-    "prompt": "hyperbolic paraboloid structure",
-    "syn": ["hyperbolic paraboloid", "hypar"]
+  "form_language.hypar": {
+    "family": "form_language",
+    "name": "Hypar",
+    "description": "A saddle-shaped, double-curved surface (hyperbolic paraboloid) often used as a lightweight shell or canopy.",
+    "synonyms": [
+      "hyperbolic paraboloid",
+      "saddle form",
+      "saddle roof",
+      "warped sheet",
+      "twisted canopy",
+      "potato chip roof"
+    ],
+    "keywords": [
+      "hypar",
+      "hyperbolic paraboloid",
+      "saddle shape",
+      "double curved",
+      "twisted surface"
+    ],
+    "avoid_confusion_with": [
+      "form_language.freeform",
+      "form_language.vault",
+      "form_language.peak",
+      "form_language.pitched"
+    ]
   },
-  "structure_system.gridshell": {
-    "group": "structure_system",
-    "prompt": "gridshell structure",
-    "syn": ["gridshell", "dome", "hyperbola"]
+
+  "form_language.vault": {
+    "family": "form_language",
+    "name": "Vault",
+    "description": "A single-direction curved form creating a tunnel-like or barrel-shaped volume.",
+    "synonyms": [
+      "barrel vault",
+      "arched tunnel",
+      "curved hall",
+      "arched canopy"
+    ],
+    "keywords": [
+      "vault",
+      "barrel",
+      "arched tunnel",
+      "curved tunnel",
+      "single curvature"
+    ],
+    "avoid_confusion_with": [
+      "form_language.hypar",
+      "form_language.peak",
+      "form_language.freeform"
+    ]
   },
-  "structure_system.hyperbolic tower": {
-    "group": "structure_system",
-    "prompt": "hyperbolic tower structure",
-    "syn": ["hyperbolic collumn", "center collumn"]
+
+  "form_language.peak": {
+    "family": "form_language",
+    "name": "Peak Form",
+    "description": "A shell or volume that converges toward one or more peaks, including dome-like, conical, tent-like, or multi-peaked forms.",
+    "synonyms": [
+      "dome",
+      "conical form",
+      "tent form",
+      "umbrella form",
+      "peaked shell",
+      "mountain roof"
+    ],
+    "keywords": [
+      "peak",
+      "conical",
+      "dome",
+      "umbrella",
+      "multi peak",
+      "tent like"
+    ],
+    "avoid_confusion_with": [
+      "form_language.vault",
+      "form_language.pitched",
+      "form_language.freeform"
+    ]
   },
-  "structure_system.post&beam": {
-    "group": "structure_system",
-    "prompt": "post and beam structure",
-    "syn": ["post and beam", "conventional bamboo construction"]
+
+  "form_language.pitched": {
+    "family": "form_language",
+    "name": "Pitched Form",
+    "description": "A form composed of one or more planar sloping surfaces, such as gable, hip, shed, or simple pavilion-like shapes.",
+    "synonyms": [
+      "gable form",
+      "hipped form",
+      "shed form",
+      "simple slope",
+      "basic house shape"
+    ],
+    "keywords": [
+      "pitched",
+      "sloped planes",
+      "gable",
+      "hip",
+      "mono pitch",
+      "planar slope"
+    ],
+    "avoid_confusion_with": [
+      "form_language.peak",
+      "form_language.vault",
+      "form_language.freeform"
+    ]
   },
+
+  "form_language.freeform": {
+    "family": "form_language",
+    "name": "Freeform",
+    "description": "A smooth, organic, non-rule-based geometry with flowing curves that do not follow a simple vault, peak, pitched, or hypar logic.",
+    "synonyms": [
+      "organic form",
+      "fluid form",
+      "blob",
+      "soft freeform surface",
+      "flowing canopy"
+    ],
+    "keywords": [
+      "freeform",
+      "organic",
+      "flowing",
+      "smooth curves",
+      "non uniform"
+    ],
+    "avoid_confusion_with": [
+      "form_language.hypar",
+      "form_language.vault",
+      "form_language.peak",
+      "form_language.pitched"
+    ]
+  },
+
+  "form_language.branching": {
+    "family": "form_language",
+    "name": "Branching",
+    "description": "A tree-like or ramified form where multiple elements branch and split, often resembling trunks and canopies.",
+    "synonyms": [
+      "tree-like form",
+      "branching structure",
+      "forest column",
+      "ramified form",
+      "root-like form"
+    ],
+    "keywords": [
+      "branching",
+      "tree",
+      "ramified",
+      "clustered supports",
+      "forest columns"
+    ],
+    "avoid_confusion_with": [
+      "form_language.freeform",
+      "structure_system.frame"
+    ]
+  },
+
+  "structure_system.frame": {
+    "family": "structure_system",
+    "name": "Frame Series",
+    "description": "A sequence of similar frames or ribs placed along a direction, forming a tunnel-like or layered structure.",
+    "synonyms": [
+      "series of frames",
+      "rib system",
+      "arched ribs",
+      "portal frame series",
+      "arch tunnel"
+    ],
+    "keywords": [
+      "frame series",
+      "ribs",
+      "repeated frames",
+      "arched frames",
+      "tunnel-like frames"
+    ],
+    "avoid_confusion_with": [
+      "structure_system.gridshell",
+      "structure_system.truss"
+    ]
+  },
+
   "structure_system.truss": {
-    "group": "structure_system",
-    "prompt": "truss structure",
-    "syn": ["truss", "frame"]
+    "family": "structure_system",
+    "name": "Truss",
+    "description": "A triangulated structural system where linear members carry mainly axial forces, including planar trusses and 3D space trusses/space frames.",
+    "synonyms": [
+      "planar truss",
+      "roof truss",
+      "space truss",
+      "space frame",
+      "triangulated frame"
+    ],
+    "keywords": [
+      "truss",
+      "triangulated",
+      "space frame",
+      "axial members",
+      "web and chord"
+    ],
+    "avoid_confusion_with": [
+      "structure_system.gridshell",
+      "structure_system.frame"
+    ]
   },
-  "form_language.geometric": {
-    "group": "form_language",
-    "prompt": "geometric-shaped structure",
-    "syn": ["triangular", "polygon"]
-  }
-  "form_language.modular": {
-    "group": "form_language",
-    "prompt": "modular expression structure",
-    "syn": ["rythm", "modular", "typical"]
-  }
-  "form_language.geometric": {
-    "group": "form_language",
-    "prompt": "organic-shaped structure",
-    "syn": ["biomimicry", "natural", "free form", "wave"]
-  }
-  "assembly.multiple": {
-    "group": "joinery",
-    "prompt": "beam to beam joinery",
-    "syn": ["biomimicry", "natural", "free form", "wave"]
+
+  "structure_system.gridshell": {
+    "family": "structure_system",
+    "name": "Gridshell",
+    "description": "A curved shell structure formed by a lattice grid that bends into shape, combining grid logic with shell behavior.",
+    "synonyms": [
+      "lattice shell",
+      "grid shell",
+      "woven shell",
+      "mesh shell"
+    ],
+    "keywords": [
+      "gridshell",
+      "lattice",
+      "bent grid",
+      "curved mesh",
+      "double curvature grid"
+    ],
+    "avoid_confusion_with": [
+      "structure_system.truss",
+      "form_language.hypar",
+      "form_language.freeform"
+    ]
+  },
+
+  "structure_system.reciprocal": {
+    "family": "structure_system",
+    "name": "Reciprocal Frame",
+    "description": "A system where members mutually support each other in a rotational or ring-like pattern, often forming radial or spiral grids.",
+    "synonyms": [
+      "reciprocal roof",
+      "reciprocal structure",
+      "self-supporting ring",
+      "rotational frame"
+    ],
+    "keywords": [
+      "reciprocal",
+      "mutual support",
+      "ring structure",
+      "rotational frame",
+      "overlapping beams"
+    ],
+    "avoid_confusion_with": [
+      "structure_system.gridshell",
+      "structure_system.truss"
+    ]
+  },
+
+  "connection.binding": {
+    "family": "connection",
+    "name": "Binding",
+    "description": "Connections made using lashings, ropes, rattan, or fiber wraps, relying on friction and confinement around the bamboo.",
+    "synonyms": [
+      "lashing",
+      "rope binding",
+      "rattan tie",
+      "fiber wrapping",
+      "corded joint"
+    ],
+    "keywords": [
+      "lashing",
+      "binding",
+      "rope",
+      "rattan",
+      "wrapped joint"
+    ],
+    "avoid_confusion_with": [
+      "connection.mechanical",
+      "connection.cutmiter"
+    ]
+  },
+
+  "connection.cutmiter": {
+    "family": "connection",
+    "name": "Cut-Miter Joint",
+    "description": "Connections formed primarily by cutting, carving, or notching the bamboo so that members fit together by shape.",
+    "synonyms": [
+      "fishmouth joint",
+      "notched joint",
+      "carved joint",
+      "saddle cut",
+      "half lap"
+    ],
+    "keywords": [
+      "cut joint",
+      "notch",
+      "fishmouth",
+      "lap joint",
+      "shaped end"
+    ],
+    "avoid_confusion_with": [
+      "connection.mechanical",
+      "connection.binding"
+    ]
+  },
+
+  "connection.mechanical": {
+    "family": "connection",
+    "name": "Mechanical Connector",
+    "description": "Connections that rely on bolts, plates, clamps, brackets, shoes, or similar hardware attached to bamboo members.",
+    "synonyms": [
+      "bolt joint",
+      "plate joint",
+      "bracket joint",
+      "clamped joint",
+      "shoe connector"
+    ],
+    "keywords": [
+      "bolt",
+      "plate",
+      "bracket",
+      "shoe",
+      "metal connector",
+      "clamp"
+    ],
+    "avoid_confusion_with": [
+      "connection.node",
+      "connection.binding"
+    ]
+  },
+
+  "connection.node": {
+    "family": "connection",
+    "name": "Node System",
+    "description": "Engineered hub or node elements that connect multiple members into a single central component, often for complex 3D geometries.",
+    "synonyms": [
+      "hub joint",
+      "central node",
+      "steel hub",
+      "multi-direction node",
+      "spider connector"
+    ],
+    "keywords": [
+      "node",
+      "hub",
+      "central connector",
+      "multi member joint",
+      "star node"
+    ],
+    "avoid_confusion_with": [
+      "connection.mechanical",
+      "structure_system.truss",
+      "structure_system.gridshell"
+    ]
+  },
+
+  "context.forest": {
+    "family": "context",
+    "name": "Forest",
+    "description": "A quiet, intimate setting surrounded by dense trees or jungle, with a feeling of privacy and immersion in nature.",
+    "synonyms": [
+      "forest",
+      "jungle",
+      "woodland",
+      "dense trees",
+      "secluded nature"
+    ],
+    "keywords": [
+      "forest",
+      "jungle",
+      "tree canopy",
+      "shaded",
+      "immersed in nature"
+    ],
+    "avoid_confusion_with": [
+      "context.beach",
+      "context.blank"
+    ]
+  },
+
+  "context.beach": {
+    "family": "context",
+    "name": "Beach Coastal",
+    "description": "A coastal setting with sand, sea or ocean, coastal vegetation, and a strong horizon line.",
+    "synonyms": [
+      "beach",
+      "coast",
+      "seaside",
+      "shoreline",
+      "tropical beach"
+    ],
+    "keywords": [
+      "beach",
+      "coastal",
+      "sand",
+      "ocean",
+      "sea",
+      "shore"
+    ],
+    "avoid_confusion_with": [
+      "context.forest",
+      "context.blank"
+    ]
+  },
+
+  "context.blank": {
+    "family": "context",
+    "name": "Blank Minimal",
+    "description": "A neutral, studio-like environment with minimal or no real-world context, used to emphasize the structure itself.",
+    "synonyms": [
+      "studio backdrop",
+      "white model scene",
+      "minimal context",
+      "gallery setting"
+    ],
+    "keywords": [
+      "blank",
+      "minimal",
+      "studio",
+      "white background",
+      "neutral environment"
+    ],
+    "avoid_confusion_with": [
+      "context.forest",
+      "context.beach"
+    ]
   }
 }
