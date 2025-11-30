@@ -1,0 +1,198 @@
+{
+  "program.house": {
+    "group": "program",
+    "name": "House",
+    "description": "A primarily residential building or dwelling."
+  },
+  "program.restaurant": {
+    "group": "program",
+    "name": "Restaurant",
+    "description": "A place where people gather to eat and drink."
+  },
+  "program.pavilion": {
+    "group": "program",
+    "name": "Pavilion",
+    "description": "A small open or semi-open structure for gathering, events, or display."
+  },
+  "program.observatory": {
+    "group": "program",
+    "name": "Observatory / Viewing Structure",
+    "description": "A structure intended for viewing the landscape or sky, often elevated or with framed views."
+  },
+  "program.lodging": {
+    "group": "program",
+    "name": "Lodging",
+    "description": "Accommodation for staying overnight, such as cabins, huts, or small guest rooms."
+  },
+  "program.yoga_space": {
+    "group": "program",
+    "name": "Yoga / Wellness Space",
+    "description": "A space for yoga, meditation, or wellness activities, typically open and calm."
+  },
+  "program.meditation_space": {
+    "group": "program",
+    "name": "Meditation Space",
+    "description": "A quiet and contemplative space focused on stillness and calm atmosphere."
+  },
+  "program.installation": {
+    "group": "program",
+    "name": "Installation / Art Structure",
+    "description": "A primarily expressive or experimental structure, often sculptural or temporary."
+  },
+  "program.auditorium": {
+    "group": "program",
+    "name": "Auditorium / Performance Hall",
+    "description": "A hall designed for performances, talks, or gatherings with audience seating."
+  },
+  "program.school_hall": {
+    "group": "program",
+    "name": "School Hall / Educational Space",
+    "description": "A space for school-related activities such as assemblies, learning, or group events."
+  },
+  "program.sports_hall": {
+    "group": "program",
+    "name": "Sports Hall",
+    "description": "A covered space for sports or physical activities."
+  },
+  "program.community_hall": {
+    "group": "program",
+    "name": "Community Hall",
+    "description": "A multi-purpose space for community gatherings, events, and shared activities."
+  },
+  "program.bridge": {
+    "group": "program",
+    "name": "Bridge",
+    "description": "A structure that spans across an obstacle such as water or terrain for circulation."
+  },
+  "program.lounge": {
+    "group": "program",
+    "name": "Lounge / Relaxation Area",
+    "description": "An informal area for sitting, relaxing, and social interaction."
+  },
+
+  "program.detail_reference": {
+    "group": "program",
+    "name": "Detail Reference",
+    "description": "An image focused on a specific joint or structural fragment for reference, not a full building."
+  },
+
+  "view.exterior": {
+    "group": "view",
+    "name": "Exterior View",
+    "description": "The viewpoint is primarily from outside the building or structure."
+  },
+  "view.interior": {
+    "group": "view",
+    "name": "Interior View",
+    "description": "The viewpoint is primarily from inside the building or under the roof."
+  },
+
+  "binding.rattan": {
+    "group": "binding",
+    "name": "Rattan Binding",
+    "description": "Connections tied using rattan or similar natural fiber."
+  },
+  "binding.bundle": {
+    "group": "binding",
+    "name": "Bundle Binding",
+    "description": "Multiple bamboo culms tied together into a bundle at the joint."
+  },
+  "binding.square_lash": {
+    "group": "binding",
+    "name": "Square Lashing",
+    "description": "Orthogonal lashing pattern that wraps around two members crossing at right angles."
+  },
+
+  "cutmiter.fishmouth": {
+    "group": "cutmiter",
+    "name": "Fishmouth Cut",
+    "description": "A concave saddle-shaped cut that allows a bamboo culm to sit snugly onto another round member."
+  },
+  "cutmiter.peg_through": {
+    "group": "cutmiter",
+    "name": "Peg-Through Cut",
+    "description": "Cuts or drillings made to allow pegs or dowels to pass through bamboo members."
+  },
+
+  "mechanical.through_bolt": {
+    "group": "mechanical",
+    "name": "Through-Bolt Connection",
+    "description": "A mechanical joint where a bolt passes through one or more members and is locked with a nut."
+  },
+  "mechanical.rod": {
+    "group": "mechanical",
+    "name": "Rod Connection",
+    "description": "Connections using metal rods, often threaded, embedded or passing through bamboo."
+  },
+  "mechanical.clamp": {
+    "group": "mechanical",
+    "name": "Clamp Connection",
+    "description": "Mechanical clamps or collars gripping the bamboo without fully penetrating it."
+  },
+  "mechanical.shoe": {
+    "group": "mechanical",
+    "name": "Base Shoe / Footing",
+    "description": "A base component that holds bamboo columns at the foundation, often metal."
+  },
+
+  "node.steel_hub": {
+    "group": "node",
+    "name": "Steel Hub Node",
+    "description": "A central steel node or hub that gathers and connects multiple bamboo members."
+  },
+
+  "render_style.photoreal": {
+    "group": "render_style",
+    "name": "Photorealistic",
+    "description": "Images that look like real photographs with natural lighting and materials."
+  },
+  "render_style.mass_model": {
+    "group": "render_style",
+    "name": "Mass Model / Concept Model",
+    "description": "Abstract or simplified representation focusing on massing and form rather than details."
+  },
+
+  "frame.profile_rectilinear": {
+    "group": "frame",
+    "name": "Rectilinear Frame Profile",
+    "description": "Frames composed mostly of straight, orthogonal members."
+  },
+  "frame.profile_arch": {
+    "group": "frame",
+    "name": "Arched Frame Profile",
+    "description": "Frames with a curved or arched elevation profile."
+  },
+
+  "truss.space": {
+    "group": "truss",
+    "name": "Space Truss / Space Frame",
+    "description": "A three-dimensional triangulated system carrying loads in multiple directions."
+  },
+  "truss.planar": {
+    "group": "truss",
+    "name": "Planar Truss",
+    "description": "A flat, typically vertical or sloping triangulated truss working in one main plane."
+  },
+
+  "reciprocal.tower": {
+    "group": "reciprocal",
+    "name": "Reciprocal Tower",
+    "description": "A vertical or tower-like configuration of reciprocal members supporting each other."
+  },
+  "reciprocal.dome": {
+    "group": "reciprocal",
+    "name": "Reciprocal Dome",
+    "description": "A dome-shaped reciprocal system forming a self-supporting roof or shell."
+  },
+
+  "bamboo.apus": {
+    "group": "bamboo",
+    "name": "Bamboo Apus",
+    "description": "Images primarily using or referencing bamboo apus species."
+  },
+  "bamboo.wulung": {
+    "group": "bamboo",
+    "name": "Bamboo Wulung",
+    "description": "Images primarily using or referencing bamboo wulung species."
+  }
+}
