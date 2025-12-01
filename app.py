@@ -303,67 +303,38 @@ def generate_with_visual_references(
     output_format: Optional[str] = None,
 ):
     """
-    CHANGED: Uses OpenAI Images API with model=gpt-image-1.
-    - If reference_urls provided -> client.images.edit(image=[...], prompt=...)
-    - Else -> client.images.generate(prompt=...)
-    Returns base64 (b64_json).
+    Uses OpenAI Images API with model=gpt-image-1.
+    For now:
+    - Ignores reference_urls (no editing), only prompt-based generation.
+    - Returns (base64_string, output_format_string).
     """
     if not _openai_client:
         raise RuntimeError("OPENAI_API_KEY is missing on the server environment.")
 
-    reference_urls = reference_urls or []
-    reference_urls = [u for u in reference_urls if isinstance(u, str) and u.strip()][:MAX_REFERENCE_IMAGES]
+    # Normalise basic options
+    size = (size or "1024x1024").strip()
+    quality = (quality or "high").strip()  # "low" | "medium" | "high" | "auto"
+    fmt = (output_format or "png").strip().lower()
 
-    size = size or "1024x1024"
-    # quality can be: "low", "medium", "high", "auto" (optional)
-    # output_format: "png" | "jpeg" | "webp" (optional; gpt-image-1 supports it)
+    if fmt not in ("png", "jpeg", "webp"):
+        fmt = "png"  # safe default
 
-    # Defaults
-    quality = quality or "auto"
-    output_format = output_format or "png"
+    # NOTE: reference_urls is accepted but not used yet.
+    # We keep it in the signature so the API contract doesn't break.
 
-    if reference_urls:
-        # Download references to temp files
-        files = []
-        paths = []
-        try:
-            for url in reference_urls:
-                f, path, _ctype = _download_to_temp_image(url)
-                files.append(f)
-                paths.append(path)
+    # Call OpenAI Images API (gpt-image-1)
+    result = _openai_client.images.generate(
+        model=OPENAI_IMAGE_MODEL,
+        prompt=prompt,
+        size=size,
+        quality=quality,
+        output_format=fmt,    # server chooses mime, we just pass the desired one
+    )
 
-            result = _openai_client.images.edit(
-                model=OPENAI_IMAGE_MODEL,      # CHANGED: gpt-image-1
-                image=files,                  # CHANGED: direct visual references
-                prompt=prompt,
-                size=size,
-                quality=quality,
-                output_format=output_format,
-            )
-            b64 = result.data[0].b64_json
-            return b64, output_format
+    # gpt-image-1 returns base64 as data[0].b64_json
+    b64 = result.data[0].b64_json
+    return b64, fmt
 
-        finally:
-            for f in files:
-                try:
-                    f.close()
-                except Exception:
-                    pass
-            for p in paths:
-                try:
-                    os.unlink(p)
-                except Exception:
-                    pass
-    else:
-        result = _openai_client.images.generate(
-            model=OPENAI_IMAGE_MODEL,          # CHANGED: gpt-image-1
-            prompt=prompt,
-            size=size,
-            quality=quality,
-            output_format=output_format,
-        )
-        b64 = result.data[0].b64_json
-        return b64, output_format
 
 
 # ==============================
@@ -467,27 +438,63 @@ def health():
 @app.post("/generate")
 def generate():
     """
-    TEMP TEST VERSION:
-    - Ignores OpenAI, just returns a fake 1x1 image.
-    - This is only to check that the route + connector work.
+    JSON body:
+      {
+        "prompt": "Render a conceptual bamboo hypar pavilion ...",
+        "reference_urls": ["https://raw.githubusercontent.com/.../a.jpg", "..."],
+        "size": "1024x1024",
+        "quality": "medium",
+        "output_format": "png"
+      }
+
+    Returns:
+      {
+        "model": "gpt-image-1",
+        "b64_image": "<base64...>",
+        "data_url": "data:image/png;base64,...",
+        "reference_count": 2,
+        "output_format": "png"
+      }
     """
     payload = request.get_json(silent=True) or {}
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
 
-    # Fake base64 for a tiny image, just for testing
-    fake_b64 = "R0lGODlhAQABAAAAACw="  # dummy data
-    fmt = "png"
-    mime = "image/png"
+    reference_urls = payload.get("reference_urls") or payload.get("ref_urls") or []
+    size = (payload.get("size") or "").strip() or None
+    quality = (payload.get("quality") or "").strip() or None
+    output_format = (payload.get("output_format") or "").strip() or None
 
-    return jsonify({
-        "model": OPENAI_IMAGE_MODEL,
-        "b64_image": fake_b64,
-        "data_url": f"data:{mime};base64,{fake_b64}",
-        "reference_count": 0,
-        "output_format": fmt,
-    }), 200
+    try:
+        b64, fmt = generate_with_visual_references(
+            prompt=prompt,
+            reference_urls=reference_urls,
+            size=size,
+            quality=quality,
+            output_format=output_format,
+        )
+
+        # Decide mime type from fmt
+        fmt_lower = (fmt or "png").lower()
+        if fmt_lower == "png":
+            mime = "image/png"
+        elif fmt_lower in ("jpg", "jpeg"):
+            mime = "image/jpeg"
+        else:
+            mime = "image/webp"
+
+        return jsonify({
+            "model": OPENAI_IMAGE_MODEL,
+            "b64_image": b64,
+            "data_url": f"data:{mime};base64,{b64}",
+            "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
+            "output_format": fmt_lower,
+        }), 200
+
+    except Exception as e:
+        # Simple error bubble-up so GPT / curl sees something useful
+        return jsonify({"error": str(e)}), 500
 
 
 # ==============================
