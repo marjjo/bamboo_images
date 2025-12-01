@@ -467,51 +467,27 @@ def health():
 @app.post("/generate")
 def generate():
     """
-    JSON body:
-      {
-        "prompt": "Render a conceptual bamboo hypar pavilion ...",
-        "reference_urls": ["https://raw.githubusercontent.com/.../a.jpg", "..."],
-        "size": "1024x1024",
-        "quality": "medium",
-        "output_format": "png"
-      }
-
-    Returns:
-      {
-        "model": "gpt-image-1",
-        "b64_image": "<base64...>",
-        "data_url": "data:image/png;base64,...",
-        "reference_count": 2
-      }
+    TEMP TEST VERSION:
+    - Ignores OpenAI, just returns a fake 1x1 image.
+    - This is only to check that the route + connector work.
     """
     payload = request.get_json(silent=True) or {}
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
         return jsonify({"error": "prompt is required"}), 400
 
-    reference_urls = payload.get("reference_urls") or payload.get("ref_urls") or []
-    size = (payload.get("size") or "").strip() or None
-    quality = (payload.get("quality") or "").strip() or None
-    output_format = (payload.get("output_format") or "").strip() or None
+    # Fake base64 for a tiny image, just for testing
+    fake_b64 = "R0lGODlhAQABAAAAACw="  # dummy data
+    fmt = "png"
+    mime = "image/png"
 
-    try:
-        b64, fmt = generate_with_visual_references(
-            prompt=prompt,
-            reference_urls=reference_urls,
-            size=size,
-            quality=quality,
-            output_format=output_format,
-        )
-        mime = "image/png" if (fmt or "").lower() == "png" else ("image/jpeg" if (fmt or "").lower() in ("jpg", "jpeg") else "image/webp")
-        return jsonify({
-            "model": OPENAI_IMAGE_MODEL,
-            "b64_image": b64,  # CHANGED key name (more general than b64_png)
-            "data_url": f"data:{mime};base64,{b64}",
-            "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
-            "output_format": fmt,
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "model": OPENAI_IMAGE_MODEL,
+        "b64_image": fake_b64,
+        "data_url": f"data:{mime};base64,{fake_b64}",
+        "reference_count": 0,
+        "output_format": fmt,
+    }), 200
 
 
 # ==============================
