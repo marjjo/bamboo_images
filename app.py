@@ -313,7 +313,7 @@ def generate_with_visual_references(
 
     # Normalise basic options
     size = (size or "1024x1024").strip()
-    quality = (quality or "high").strip()  # "low" | "medium" | "high" | "auto"
+    quality = (quality or "low").strip()  # "low" | "medium" | "high" | "auto"
     fmt = (output_format or "png").strip().lower()
 
     if fmt not in ("png", "jpeg", "webp"):
