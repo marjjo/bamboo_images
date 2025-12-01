@@ -302,39 +302,30 @@ def generate_with_visual_references(
     quality: Optional[str] = None,
     output_format: Optional[str] = None,
 ):
-    """
-    Uses OpenAI Images API with model=gpt-image-1.
-    For now:
-    - Ignores reference_urls (no editing), only prompt-based generation.
-    - Returns (base64_string, output_format_string).
-    """
     if not _openai_client:
         raise RuntimeError("OPENAI_API_KEY is missing on the server environment.")
 
     # Normalise basic options
     size = (size or "1024x1024").strip()
-    quality = (quality or "low").strip()  # "low" | "medium" | "high" | "auto"
+    # Clamp size to supported values
+    if size not in ("1024x1024", "1024x1536", "1536x1024", "auto"):
+        size = "1024x1024"
+
+    quality = (quality or "low").strip()  # default to low for trial
     fmt = (output_format or "png").strip().lower()
-
     if fmt not in ("png", "jpeg", "webp"):
-        fmt = "png"  # safe default
+        fmt = "png"
 
-    # NOTE: reference_urls is accepted but not used yet.
-    # We keep it in the signature so the API contract doesn't break.
-
-    # Call OpenAI Images API (gpt-image-1)
     result = _openai_client.images.generate(
         model=OPENAI_IMAGE_MODEL,
         prompt=prompt,
         size=size,
         quality=quality,
-        output_format=fmt,    # server chooses mime, we just pass the desired one
+        output_format=fmt,
     )
 
-    # gpt-image-1 returns base64 as data[0].b64_json
     b64 = result.data[0].b64_json
     return b64, fmt
-
 
 
 # ==============================
