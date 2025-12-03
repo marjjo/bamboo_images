@@ -1,7 +1,9 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import os, json, hashlib, random, base64
 import requests
+import mimetypes
+import sys
 
 # NEW: for safe temp files and URL parsing
 import tempfile  # NEW
@@ -436,10 +438,19 @@ def serve_generated(filename):
     Serve generated images from the 'generated' folder.
     """
     full_path = os.path.join(GENERATED_DIR, filename)
+
     if not os.path.exists(full_path):
+        # helpful log for Render / local debug
+        print(f"[serve_generated] file not found: {full_path}", file=sys.stderr, flush=True)
         return jsonify({"error": "file not found"}), 404
 
-    return send_from_directory(GENERATED_DIR, filename)
+    # Guess MIME type from extension (jpeg, png, etc.)
+    mime_type, _ = mimetypes.guess_type(full_path)
+    if mime_type is None:
+        mime_type = "image/jpeg"
+
+    return send_file(full_path, mimetype=mime_type)
+
 
 
 @app.post("/generate")
