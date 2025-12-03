@@ -19,6 +19,9 @@ REPO = "bamboo_images"
 BRANCH = "main"
 BASE_PATH = "images"
 
+BASE_DIR = os.path.dirname(__file__)
+GENERATED_DIR = os.path.join(BASE_DIR, "generated")
+
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ANNOTATIONS_PATH = os.getenv("ANNOTATIONS_PATH", "annotations.json")
 
@@ -432,7 +435,11 @@ def serve_generated(filename):
     """
     Serve generated images from the 'generated' folder.
     """
-    return send_from_directory("generated", filename)
+    full_path = os.path.join(GENERATED_DIR, filename)
+    if not os.path.exists(full_path):
+        return jsonify({"error": "file not found"}), 404
+
+    return send_from_directory(GENERATED_DIR, filename)
 
 
 @app.post("/generate")
@@ -482,26 +489,25 @@ def generate():
             return jsonify({"error": f"failed to decode image base64: {e}"}), 500
 
         # 3) Ensure output folder exists
-        out_dir = os.path.join(os.path.dirname(__file__), "generated")
-        os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(GENERATED_DIR, exist_ok=True)
 
         # 4) Build a semi-unique filename
         fmt_lower = (fmt or "jpeg").lower()
         if fmt_lower not in ("png", "jpeg", "jpg", "webp"):
             fmt_lower = "jpeg"
 
-        # small hash from the prompt + length of data
-        digest = hashlib.md5((prompt + str(len(img_bytes))).encode("utf-8")).hexdigest()[:8]
+        digest = hashlib.md5(
+            (prompt + str(len(img_bytes))).encode("utf-8")
+        ).hexdigest()[:8]
         filename = f"img_{digest}.{fmt_lower}"
-        filepath = os.path.join(out_dir, filename)
+        filepath = os.path.join(GENERATED_DIR, filename)
 
         # 5) Save file
         with open(filepath, "wb") as f:
             f.write(img_bytes)
 
         # 6) Build public URL
-        # request.url_root is like "https://bamboo-images.onrender.com/"
-        base_url = request.url_root.rstrip("/")
+        base_url = request.url_root.rstrip("/")  # e.g. https://bamboo-images.onrender.com
         image_url = f"{base_url}/generated/{filename}"
 
         return jsonify({
@@ -512,6 +518,7 @@ def generate():
         }), 200
 
     except Exception as e:
+        # IMPORTANT: do NOT reference `filename` here
         return jsonify({"error": str(e)}), 500
 
 
