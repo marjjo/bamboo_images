@@ -429,25 +429,6 @@ def health():
 
 @app.post("/generate")
 def generate():
-    """
-    JSON body:
-      {
-        "prompt": "Render a conceptual bamboo hypar pavilion ...",
-        "reference_urls": ["https://raw.githubusercontent.com/.../a.jpg", "..."],
-        "size": "1024x1024",
-        "quality": "medium",
-        "output_format": "png"
-      }
-
-    Returns:
-      {
-        "model": "gpt-image-1",
-        "b64_image": "<base64...>",
-        "data_url": "data:image/png;base64,...",
-        "reference_count": 2,
-        "output_format": "png"
-      }
-    """
     payload = request.get_json(silent=True) or {}
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
@@ -467,14 +448,7 @@ def generate():
             output_format=output_format,
         )
 
-        # Decide mime type from fmt
-        fmt_lower = (fmt or "png").lower()
-        if fmt_lower == "png":
-            mime = "image/png"
-        elif fmt_lower in ("jpg", "jpeg"):
-            mime = "image/jpeg"
-        else:
-            mime = "image/webp"
+        fmt_lower = (fmt or "jpeg").lower()
 
         return jsonify({
             "model": OPENAI_IMAGE_MODEL,
@@ -484,7 +458,6 @@ def generate():
         }), 200
 
     except Exception as e:
-        # Simple error bubble-up so GPT / curl sees something useful
         return jsonify({"error": str(e)}), 500
 
 
