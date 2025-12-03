@@ -311,10 +311,11 @@ def generate_with_visual_references(
     if size not in ("1024x1024", "1024x1536", "1536x1024", "auto"):
         size = "1024x1024"
 
-    quality = (quality or "low").strip()  # default to low for trial
-    fmt = (output_format or "png").strip().lower()
+    quality = (quality or "low").strip()  # default to low
+    fmt = (output_format or "jpeg").strip().lower()
     if fmt not in ("png", "jpeg", "webp"):
-        fmt = "png"
+        fmt = "jpeg"  # safer, smaller than PNG
+
 
     result = _openai_client.images.generate(
         model=OPENAI_IMAGE_MODEL,
@@ -478,9 +479,8 @@ def generate():
         return jsonify({
             "model": OPENAI_IMAGE_MODEL,
             "b64_image": b64,
-            "data_url": f"data:{mime};base64,{b64}",
-            "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
             "output_format": fmt_lower,
+            "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
         }), 200
 
     except Exception as e:
