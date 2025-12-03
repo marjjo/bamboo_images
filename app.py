@@ -305,18 +305,16 @@ def generate_with_visual_references(
     if not _openai_client:
         raise RuntimeError("OPENAI_API_KEY is missing on the server environment.")
 
-    # Normalise basic options
+    # Normalise size (still allow auto)
     size = (size or "1024x1024").strip()
-    # Clamp size to supported values
     if size not in ("1024x1024", "1024x1536", "1536x1024", "auto"):
         size = "1024x1024"
 
-    quality = (quality or "low").strip()  # default to low
-    fmt = (output_format or "jpeg").strip().lower()
-    if fmt not in ("png", "jpeg", "webp"):
-        fmt = "jpeg"  # safer, smaller than PNG
+    # HARD OVERRIDE: always low + jpeg
+    quality = "low"
+    fmt = "jpeg"
 
-
+    print("[generate_with_visual_references] start", size, quality, fmt, flush=True)
     result = _openai_client.images.generate(
         model=OPENAI_IMAGE_MODEL,
         prompt=prompt,
@@ -324,9 +322,11 @@ def generate_with_visual_references(
         quality=quality,
         output_format=fmt,
     )
+    print("[generate_with_visual_references] done", flush=True)
 
     b64 = result.data[0].b64_json
     return b64, fmt
+
 
 
 # ==============================
