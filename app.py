@@ -427,8 +427,34 @@ def health():
     })
 
 
+@app.get("/generated/<path:filename>")
+def serve_generated(filename):
+    """
+    Serve generated images from the 'generated' folder.
+    """
+    return send_from_directory("generated", filename)
+
+
 @app.post("/generate")
 def generate():
+    """
+    JSON body:
+      {
+        "prompt": "Render a conceptual bamboo hypar pavilion ...",
+        "reference_urls": ["https://raw.githubusercontent.com/.../a.jpg", "..."],
+        "size": "1024x1024",
+        "quality": "medium",
+        "output_format": "png"
+      }
+
+    Returns a small JSON with a public URL to the generated image:
+      {
+        "model": "gpt-image-1",
+        "image_url": "https://bamboo-images.onrender.com/generated/....jpeg",
+        "output_format": "jpeg",
+        "reference_count": 0
+      }
+    """
     payload = request.get_json(silent=True) or {}
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
@@ -440,6 +466,7 @@ def generate():
     output_format = (payload.get("output_format") or "").strip() or None
 
     try:
+        # 1) Call OpenAI (returns base64 + format)
         b64, fmt = generate_with_visual_references(
             prompt=prompt,
             reference_urls=reference_urls,
@@ -448,11 +475,38 @@ def generate():
             output_format=output_format,
         )
 
+        # 2) Decode base64 to bytes
+        try:
+            img_bytes = base64.b64decode(b64)
+        except Exception as e:
+            return jsonify({"error": f"failed to decode image base64: {e}"}), 500
+
+        # 3) Ensure output folder exists
+        out_dir = os.path.join(os.path.dirname(__file__), "generated")
+        os.makedirs(out_dir, exist_ok=True)
+
+        # 4) Build a semi-unique filename
         fmt_lower = (fmt or "jpeg").lower()
+        if fmt_lower not in ("png", "jpeg", "jpg", "webp"):
+            fmt_lower = "jpeg"
+
+        # small hash from the prompt + length of data
+        digest = hashlib.md5((prompt + str(len(img_bytes))).encode("utf-8")).hexdigest()[:8]
+        filename = f"img_{digest}.{fmt_lower}"
+        filepath = os.path.join(out_dir, filename)
+
+        # 5) Save file
+        with open(filepath, "wb") as f:
+            f.write(img_bytes)
+
+        # 6) Build public URL
+        # request.url_root is like "https://bamboo-images.onrender.com/"
+        base_url = request.url_root.rstrip("/")
+        image_url = f"{base_url}/generated/{filename}"
 
         return jsonify({
             "model": OPENAI_IMAGE_MODEL,
-            "b64_image": b64,
+            "image_url": image_url,
             "output_format": fmt_lower,
             "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
         }), 200
