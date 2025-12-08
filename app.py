@@ -307,31 +307,82 @@ def generate_with_visual_references(
     quality: Optional[str] = None,
     output_format: Optional[str] = None,
 ):
+    """
+    Generate an image using gpt-image-1.
+
+    - If reference_urls are provided (and valid), they are downloaded
+      and sent as source images so the model can use them as visual guidance.
+    - If no valid references are available, it falls back to pure text-to-image.
+    """
     if not _openai_client:
         raise RuntimeError("OPENAI_API_KEY is missing on the server environment.")
 
-    # Normalise size (still allow auto)
+    # 1) Normalise size
     size = (size or "1024x1024").strip()
     if size not in ("1024x1024", "1024x1536", "1536x1024", "auto"):
         size = "1024x1024"
 
-    # HARD OVERRIDE: always low + jpeg
+    # 2) HARD OVERRIDE: always low + jpeg (your design choice)
     quality = "low"
     fmt = "jpeg"
 
-    print("[generate_with_visual_references] start", size, quality, fmt, flush=True)
-    result = _openai_client.images.generate(
-        model=OPENAI_IMAGE_MODEL,
-        prompt=prompt,
-        size=size,
-        quality=quality,
-        output_format=fmt,
-    )
-    print("[generate_with_visual_references] done", flush=True)
+    # 3) Try to download reference images (up to MAX_REFERENCE_IMAGES)
+    files = []  # list of open file objects
+    refs = (reference_urls or [])[:MAX_REFERENCE_IMAGES]
 
-    b64 = result.data[0].b64_json
-    return b64, fmt
+    try:
+        for url in refs:
+            try:
+                f, tmp_path, ctype = _download_to_temp_image(url)
+                files.append(f)
+            except Exception as e:
+                # If a ref fails validation/download, just skip it
+                print(f"[generate_with_visual_references] skip ref {url}: {e}", flush=True)
 
+        print(
+            "[generate_with_visual_references] start",
+            {"size": size, "quality": quality, "fmt": fmt, "ref_count": len(files)},
+            flush=True,
+        )
+
+        # 4) Call OpenAI
+        if files:
+            # Visual-reference mode: use image edit endpoint with source images
+            # For gpt-image-1, you can provide multiple images to "image".
+            result = _openai_client.images.edits(
+                model=OPENAI_IMAGE_MODEL,
+                image=files if len(files) > 1 else files[0],
+                prompt=prompt,
+                size=size,
+                quality=quality,
+                output_format=fmt,
+                # Optional: make it stick closer to the references
+                input_fidelity="high",
+            )
+        else:
+            # No valid references → pure text-to-image (your original behavior)
+            result = _openai_client.images.generate(
+                model=OPENAI_IMAGE_MODEL,
+                prompt=prompt,
+                size=size,
+                quality=quality,
+                output_format=fmt,
+            )
+
+        print("[generate_with_visual_references] done", flush=True)
+
+        b64 = result.data[0].b64_json
+        return b64, fmt
+
+    finally:
+        # 5) Clean up all temp files (very important on Render)
+        for f in files:
+            try:
+                path = f.name
+                f.close()
+                os.unlink(path)
+            except Exception:
+                pass
 
 
 # ==============================
