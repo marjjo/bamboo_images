@@ -349,7 +349,7 @@ def generate_with_visual_references(
         if files:
             # Visual-reference mode: use image edit endpoint with source images
             # For gpt-image-1, you can provide multiple images to "image".
-            result = _openai_client.images.edits(
+            result = _openai_client.images.edit(
                 model=OPENAI_IMAGE_MODEL,
                 image=files if len(files) > 1 else files[0],
                 prompt=prompt,
