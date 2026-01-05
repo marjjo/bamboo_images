@@ -398,13 +398,32 @@ def list_images():
     tags_param = request.args.get("tags", "").strip()
     any_param = request.args.get("any", "").strip()
     q = request.args.get("q", "").strip().lower()
+
     limit = int(request.args.get("limit", 8))
+    offset = int(request.args.get("offset", 0))  # NEW
+
+    # Safety clamps
+    if limit < 1:
+        limit = 1
+    if limit > 200:
+        limit = 200
+    if offset < 0:
+        offset = 0
 
     required_tags = {t.strip() for t in tags_param.split(",") if t.strip()}
     any_tags = {t.strip() for t in any_param.split(",") if t.strip()}
 
     images = list_all_images(limit=10_000)
+
+    # 🔑 IMPORTANT: deterministic ordering so offset works correctly
+    images.sort(key=lambda x: (
+        x.get("url", ""),
+        x.get("title", ""),
+        x.get("id", "")
+    ))
+
     results = []
+    total_matches = 0
 
     for img in images:
         tagset = set(img.get("tags", []))
@@ -413,17 +432,28 @@ def list_images():
             continue
         if any_tags and not (tagset & any_tags):
             continue
-
         if q:
             hay = (img.get("title", "") + " " + " ".join(img.get("tags", []))).lower()
             if q not in hay:
                 continue
 
+        # Image matches filters
+        total_matches += 1
+
+        if total_matches <= offset:
+            continue
+
         results.append(img)
         if len(results) >= limit:
             break
 
-    return jsonify({"count": len(results), "items": results})
+    return jsonify({
+        "count": len(results),      # returned in this batch
+        "total": total_matches,     # total matching images
+        "offset": offset,
+        "limit": limit,
+        "items": results
+    })
 
 
 @app.get("/tags")
