@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response  # CHANGED: add Response
 from flask_cors import CORS
 import os, json, hashlib, random, base64
 import requests
@@ -6,9 +6,9 @@ import mimetypes
 import sys
 
 # NEW: for safe temp files and URL parsing
-import tempfile  # NEW
-from urllib.parse import urlparse  # NEW
-from typing import Optional, List  # NEW
+import tempfile
+from urllib.parse import urlparse
+from typing import Optional, List
 
 # OpenAI client
 from openai import OpenAI
@@ -27,19 +27,27 @@ GENERATED_DIR = os.path.join(BASE_DIR, "generated")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ANNOTATIONS_PATH = os.getenv("ANNOTATIONS_PATH", "annotations.json")
 
-# CHANGED: model config -> gpt-image-1 only
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_IMAGE_MODEL = "gpt-image-1"  # CHANGED (was gpt-image-1-mini)
-MAX_REFERENCE_IMAGES = 4            # unchanged
+# NEW: public base URL so returned image URLs are on your API domain (for inline rendering)
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://bamboo-images.onrender.com").rstrip("/")  # NEW
 
-# NEW: allowlist to prevent SSRF; default allows GitHub raw + user-images
+# Model config
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_IMAGE_MODEL = "gpt-image-1"
+MAX_REFERENCE_IMAGES = 4
+
+# NEW: allowlist to prevent SSRF; include your API host so /img/<id> can be used as reference URLs too
 ALLOWED_REF_HOSTS = set(
     h.strip().lower()
-    for h in (os.getenv("ALLOWED_REF_HOSTS", "raw.githubusercontent.com,githubusercontent.com").split(","))
+    for h in (
+        os.getenv(
+            "ALLOWED_REF_HOSTS",
+            "raw.githubusercontent.com,githubusercontent.com,bamboo-images.onrender.com",
+        ).split(",")
+    )
     if h.strip()
-)  # NEW
+)
 
-MAX_IMAGE_BYTES = 50 * 1024 * 1024  # NEW: 50MB per image (matches gpt-image-1 limits)
+MAX_IMAGE_BYTES = 50 * 1024 * 1024  # 50MB per image
 
 app = Flask(__name__)
 CORS(app)
@@ -66,22 +74,17 @@ def load_annotations(path: str = ANNOTATIONS_PATH):
 
         norm = {}
         for fname, meta in data.items():
-            if isinstance(meta, dict):
-                tags_raw = meta.get("tags", [])
-            else:
-                tags_raw = meta
-
+            tags_raw = meta.get("tags", []) if isinstance(meta, dict) else meta
             if not isinstance(tags_raw, list):
                 tags_raw = [tags_raw]
-
             cleaned = [str(t).strip() for t in tags_raw if str(t).strip()]
             if cleaned:
                 norm[fname] = cleaned
         return norm
-
     except Exception as e:
         print(f"[WARN] Failed to load {path}: {e}")
         return {}
+
 
 ANNOTATIONS = load_annotations()
 
@@ -90,9 +93,7 @@ ANNOTATIONS = load_annotations()
 # GitHub helpers
 # ==============================
 def gh_list(path: str):
-    """
-    List files/folders at a GitHub path using the Contents API.
-    """
+    """List files/folders at a GitHub path using the Contents API."""
     base = f"https://api.github.com/repos/{OWNER}/{REPO}"
     suffix = f"/contents/{path}" if path else "/contents"
     url = f"{base}{suffix}?ref={BRANCH}"
@@ -125,9 +126,8 @@ def canonicalize_parts(parts):
 
     for p in parts[1:]:
         p = (p or "").strip()
-        if not p:
-            continue
-        tags.append(f"{category}.{p}")
+        if p:
+            tags.append(f"{category}.{p}")
     return tags
 
 
@@ -135,6 +135,10 @@ def walk_images(path: str):
     """
     Recursively walk the BASE_PATH in GitHub and yield image items
     with merged tags (folder-derived + annotations.json).
+
+    IMPORTANT:
+    - Keep GitHub URL as source_url (for proxy fetch + generation fallback).
+    - Return public url as /img/<id> so ChatGPT can render inline reliably.
     """
     stack = [path]
     while stack:
@@ -149,18 +153,19 @@ def walk_images(path: str):
                     it["type"] == "file"
                     and it["name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))
                 ):
-                    rel = it["path"][len(BASE_PATH):].strip("/")
+                    rel = it["path"][len(BASE_PATH) :].strip("/")
                     parts = rel.split("/")[:-1]
                     folder_tags = canonicalize_parts(parts)
 
                     fname = it["name"]
                     extra_tags = ANNOTATIONS.get(fname, [])
-
                     all_tags = sorted(set(folder_tags) | set(extra_tags))
 
+                    short_id = it["sha"][:8]
                     yield {
-                        "id": it["sha"][:8],
-                        "url": it["download_url"],
+                        "id": short_id,
+                        "source_url": it["download_url"],  # NEW: keep GitHub as true source
+                        "url": f"{PUBLIC_BASE_URL}/img/{short_id}",  # NEW: proxy URL for clients/ChatGPT
                         "title": fname,
                         "tags": all_tags,
                     }
@@ -217,15 +222,17 @@ def pick_options_for_family(family: str, tag_index: dict, limit: int = 3, user_k
         if not chosen_img:
             continue
 
-        options.append({
-            "tag": tag,
-            "image": {
-                "id": chosen_img["id"],
-                "url": chosen_img["url"],
-                "title": chosen_img["title"],
-                "tags": chosen_img.get("tags", []),
+        options.append(
+            {
+                "tag": tag,
+                "image": {
+                    "id": chosen_img["id"],
+                    "url": chosen_img["url"],  # will be proxied /img/<id>
+                    "title": chosen_img["title"],
+                    "tags": chosen_img.get("tags", []),
+                },
             }
-        })
+        )
 
         if len(options) >= limit:
             break
@@ -234,11 +241,9 @@ def pick_options_for_family(family: str, tag_index: dict, limit: int = 3, user_k
 
 
 # ==============================
-# CHANGED: Image generation (gpt-image-1 only)
+# Image generation (gpt-image-1 only)
 # ==============================
-# REMOVED: _extract_first_image_b64 + Responses API tool parsing
-
-def _validate_ref_url(url: str) -> None:  # NEW
+def _validate_ref_url(url: str) -> None:
     u = urlparse(url)
     if u.scheme != "https":
         raise ValueError("Reference URL must be https.")
@@ -249,7 +254,7 @@ def _validate_ref_url(url: str) -> None:  # NEW
         raise ValueError(f"Reference host not allowed: {host}")
 
 
-def _download_to_temp_image(url: str):  # NEW
+def _download_to_temp_image(url: str):
     """
     Download an image URL to a temp file and return (file_obj, path, content_type).
     Enforces: https + host allowlist + <50MB + image/*.
@@ -263,7 +268,6 @@ def _download_to_temp_image(url: str):  # NEW
     if not ctype.startswith("image/"):
         raise ValueError(f"Reference is not an image (content-type={ctype}).")
 
-    # Pick a safe suffix
     if "png" in ctype:
         suffix = ".png"
     elif "jpeg" in ctype or "jpg" in ctype:
@@ -273,7 +277,7 @@ def _download_to_temp_image(url: str):  # NEW
     else:
         suffix = ".img"
 
-    tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)  # we delete manually
+    tf = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     bytes_written = 0
     try:
         for chunk in r.iter_content(chunk_size=1024 * 64):
@@ -307,48 +311,29 @@ def generate_with_visual_references(
     quality: Optional[str] = None,
     output_format: Optional[str] = None,
 ):
-    """
-    Generate an image using gpt-image-1.
-
-    - If reference_urls are provided (and valid), they are downloaded
-      and sent as source images so the model can use them as visual guidance.
-    - If no valid references are available, it falls back to pure text-to-image.
-    """
     if not _openai_client:
         raise RuntimeError("OPENAI_API_KEY is missing on the server environment.")
 
-    # 1) Normalise size
     size = (size or "1024x1024").strip()
     if size not in ("1024x1024", "1024x1536", "1536x1024", "auto"):
         size = "1024x1024"
 
-    # 2) HARD OVERRIDE: always low + jpeg (your design choice)
+    # HARD OVERRIDE: always low + jpeg
     quality = "low"
     fmt = "jpeg"
 
-    # 3) Try to download reference images (up to MAX_REFERENCE_IMAGES)
-    files = []  # list of open file objects
+    files = []
     refs = (reference_urls or [])[:MAX_REFERENCE_IMAGES]
 
     try:
         for url in refs:
             try:
-                f, tmp_path, ctype = _download_to_temp_image(url)
+                f, _tmp_path, _ctype = _download_to_temp_image(url)
                 files.append(f)
             except Exception as e:
-                # If a ref fails validation/download, just skip it
                 print(f"[generate_with_visual_references] skip ref {url}: {e}", flush=True)
 
-        print(
-            "[generate_with_visual_references] start",
-            {"size": size, "quality": quality, "fmt": fmt, "ref_count": len(files)},
-            flush=True,
-        )
-
-        # 4) Call OpenAI
         if files:
-            # Visual-reference mode: use image edit endpoint with source images
-            # For gpt-image-1, you can provide multiple images to "image".
             result = _openai_client.images.edit(
                 model=OPENAI_IMAGE_MODEL,
                 image=files if len(files) > 1 else files[0],
@@ -356,11 +341,9 @@ def generate_with_visual_references(
                 size=size,
                 quality=quality,
                 output_format=fmt,
-                # Optional: make it stick closer to the references
                 input_fidelity="high",
             )
         else:
-            # No valid references → pure text-to-image (your original behavior)
             result = _openai_client.images.generate(
                 model=OPENAI_IMAGE_MODEL,
                 prompt=prompt,
@@ -369,13 +352,10 @@ def generate_with_visual_references(
                 output_format=fmt,
             )
 
-        print("[generate_with_visual_references] done", flush=True)
-
         b64 = result.data[0].b64_json
         return b64, fmt
 
     finally:
-        # 5) Clean up all temp files (very important on Render)
         for f in files:
             try:
                 path = f.name
@@ -390,7 +370,7 @@ def generate_with_visual_references(
 # ==============================
 @app.get("/")
 def home():
-    return "Hi marjo! Welcome back to Bamboo Image API (images + tags + gpt-image-1 generation)"  # CHANGED
+    return "Hi marjo! Welcome back to Bamboo Image API (images + tags + gpt-image-1 generation)"
 
 
 @app.get("/images")
@@ -400,9 +380,8 @@ def list_images():
     q = request.args.get("q", "").strip().lower()
 
     limit = int(request.args.get("limit", 8))
-    offset = int(request.args.get("offset", 0))  # NEW
+    offset = int(request.args.get("offset", 0))
 
-    # Safety clamps
     if limit < 1:
         limit = 1
     if limit > 200:
@@ -415,12 +394,14 @@ def list_images():
 
     images = list_all_images(limit=10_000)
 
-    # 🔑 IMPORTANT: deterministic ordering so offset works correctly
-    images.sort(key=lambda x: (
-        x.get("url", ""),
-        x.get("title", ""),
-        x.get("id", "")
-    ))
+    # Deterministic ordering so offset works correctly (use source_url/id to avoid URL changes)
+    images.sort(
+        key=lambda x: (
+            x.get("source_url", ""),
+            x.get("title", ""),
+            x.get("id", ""),
+        )
+    )
 
     results = []
     total_matches = 0
@@ -437,9 +418,7 @@ def list_images():
             if q not in hay:
                 continue
 
-        # Image matches filters
         total_matches += 1
-
         if total_matches <= offset:
             continue
 
@@ -447,13 +426,15 @@ def list_images():
         if len(results) >= limit:
             break
 
-    return jsonify({
-        "count": len(results),      # returned in this batch
-        "total": total_matches,     # total matching images
-        "offset": offset,
-        "limit": limit,
-        "items": results
-    })
+    return jsonify(
+        {
+            "count": len(results),
+            "total": total_matches,
+            "offset": offset,
+            "limit": limit,
+            "items": results,
+        }
+    )
 
 
 @app.get("/tags")
@@ -501,31 +482,29 @@ def health():
 
     status = "ok" if (gh_ok and openai_ok) else "degraded"
 
-    return jsonify({
-        "status": status,
-        "github": {"ok": gh_ok, "detail": gh_msg},
-        "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH},
-        "openai": {"ok": openai_ok, "model": OPENAI_IMAGE_MODEL},  # CHANGED
-        "refs": {
-            "max_reference_images": MAX_REFERENCE_IMAGES,
-            "allowed_ref_hosts": sorted(ALLOWED_REF_HOSTS),
+    return jsonify(
+        {
+            "status": status,
+            "github": {"ok": gh_ok, "detail": gh_msg},
+            "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH},
+            "openai": {"ok": openai_ok, "model": OPENAI_IMAGE_MODEL},
+            "refs": {
+                "max_reference_images": MAX_REFERENCE_IMAGES,
+                "allowed_ref_hosts": sorted(ALLOWED_REF_HOSTS),
+            },
         }
-    })
+    )
 
 
 @app.get("/generated/<path:filename>")
 def serve_generated(filename):
-    """
-    Serve generated images from the 'generated' folder.
-    """
+    """Serve generated images from the 'generated' folder."""
     full_path = os.path.join(GENERATED_DIR, filename)
 
     if not os.path.exists(full_path):
-        # helpful log for Render / local debug
         print(f"[serve_generated] file not found: {full_path}", file=sys.stderr, flush=True)
         return jsonify({"error": "file not found"}), 404
 
-    # Guess MIME type from extension (jpeg, png, etc.)
     mime_type, _ = mimetypes.guess_type(full_path)
     if mime_type is None:
         mime_type = "image/jpeg"
@@ -533,27 +512,8 @@ def serve_generated(filename):
     return send_file(full_path, mimetype=mime_type)
 
 
-
 @app.post("/generate")
 def generate():
-    """
-    JSON body:
-      {
-        "prompt": "Render a conceptual bamboo hypar pavilion ...",
-        "reference_urls": ["https://raw.githubusercontent.com/.../a.jpg", "..."],
-        "size": "1024x1024",
-        "quality": "medium",
-        "output_format": "png"
-      }
-
-    Returns a small JSON with a public URL to the generated image:
-      {
-        "model": "gpt-image-1",
-        "image_url": "https://bamboo-images.onrender.com/generated/....jpeg",
-        "output_format": "jpeg",
-        "reference_count": 0
-      }
-    """
     payload = request.get_json(silent=True) or {}
     prompt = (payload.get("prompt") or "").strip()
     if not prompt:
@@ -565,7 +525,6 @@ def generate():
     output_format = (payload.get("output_format") or "").strip() or None
 
     try:
-        # 1) Call OpenAI (returns base64 + format)
         b64, fmt = generate_with_visual_references(
             prompt=prompt,
             reference_urls=reference_urls,
@@ -574,43 +533,67 @@ def generate():
             output_format=output_format,
         )
 
-        # 2) Decode base64 to bytes
         try:
             img_bytes = base64.b64decode(b64)
         except Exception as e:
             return jsonify({"error": f"failed to decode image base64: {e}"}), 500
 
-        # 3) Ensure output folder exists
         os.makedirs(GENERATED_DIR, exist_ok=True)
 
-        # 4) Build a semi-unique filename
         fmt_lower = (fmt or "jpeg").lower()
         if fmt_lower not in ("png", "jpeg", "jpg", "webp"):
             fmt_lower = "jpeg"
 
-        digest = hashlib.md5(
-            (prompt + str(len(img_bytes))).encode("utf-8")
-        ).hexdigest()[:8]
+        digest = hashlib.md5((prompt + str(len(img_bytes))).encode("utf-8")).hexdigest()[:8]
         filename = f"img_{digest}.{fmt_lower}"
         filepath = os.path.join(GENERATED_DIR, filename)
 
-        # 5) Save file
         with open(filepath, "wb") as f:
             f.write(img_bytes)
 
-        # 6) Build public URL
-        base_url = request.url_root.rstrip("/")  # e.g. https://bamboo-images.onrender.com
-        image_url = f"{base_url}/generated/{filename}"
+        # Use PUBLIC_BASE_URL instead of request.url_root (more reliable behind proxies)
+        image_url = f"{PUBLIC_BASE_URL}/generated/{filename}"
 
-        return jsonify({
-            "model": OPENAI_IMAGE_MODEL,
-            "image_url": image_url,
-            "output_format": fmt_lower,
-            "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
-        }), 200
+        return (
+            jsonify(
+                {
+                    "model": OPENAI_IMAGE_MODEL,
+                    "image_url": image_url,
+                    "output_format": fmt_lower,
+                    "reference_count": min(len(reference_urls or []), MAX_REFERENCE_IMAGES),
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
-        # IMPORTANT: do NOT reference `filename` here
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/img/<image_id>")
+def proxy_image(image_id):
+    """
+    Proxy GitHub-hosted images through this API domain
+    so ChatGPT can render them inline.
+    """
+    try:
+        images = list_all_images(limit=10_000)
+        img = next((i for i in images if i["id"] == image_id), None)
+
+        if not img:
+            return jsonify({"error": "image not found"}), 404
+
+        src = img.get("source_url")
+        if not src:
+            return jsonify({"error": "source_url missing"}), 500
+
+        r = requests.get(src, stream=True, timeout=15)
+        r.raise_for_status()
+
+        content_type = r.headers.get("content-type", "image/jpeg")
+        return Response(r.iter_content(chunk_size=8192), content_type=content_type)
+
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
