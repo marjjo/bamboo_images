@@ -1,5 +1,3 @@
-wait read the app.py first this is the current version
-
 from flask import Flask, request, jsonify, send_file, Response  # CHANGED: add Response
 from flask_cors import CORS
 import os, json, hashlib, random, base64
