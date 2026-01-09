@@ -1,18 +1,14 @@
-wait read the app.py first this is the current version
-
-from flask import Flask, request, jsonify, send_file, Response  # CHANGED: add Response
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 import os, json, hashlib, random, base64
 import requests
 import mimetypes
 import sys
 
-# NEW: for safe temp files and URL parsing
 import tempfile
 from urllib.parse import urlparse
 from typing import Optional, List
 
-# OpenAI client
 from openai import OpenAI
 
 # ==============================
@@ -29,15 +25,15 @@ GENERATED_DIR = os.path.join(BASE_DIR, "generated")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 ANNOTATIONS_PATH = os.getenv("ANNOTATIONS_PATH", "annotations.json")
 
-# NEW: public base URL so returned image URLs are on your API domain (for inline rendering)
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://bamboo-images.onrender.com").rstrip("/")  # NEW
+# Public base URL so returned image URLs are on your API domain (better inline rendering)
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://bamboo-images.onrender.com").rstrip("/")
 
 # Model config
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_IMAGE_MODEL = "gpt-image-1"
 MAX_REFERENCE_IMAGES = 4
 
-# NEW: allowlist to prevent SSRF; include your API host so /img/<id> can be used as reference URLs too
+# Allowlist to prevent SSRF; include your API host so /img/<id>.jpg can be used as reference URLs too
 ALLOWED_REF_HOSTS = set(
     h.strip().lower()
     for h in (
@@ -84,7 +80,7 @@ def load_annotations(path: str = ANNOTATIONS_PATH):
                 norm[fname] = cleaned
         return norm
     except Exception as e:
-        print(f"[WARN] Failed to load {path}: {e}")
+        print(f"[WARN] Failed to load {path}: {e}", flush=True)
         return {}
 
 
@@ -140,7 +136,7 @@ def walk_images(path: str):
 
     IMPORTANT:
     - Keep GitHub URL as source_url (for proxy fetch + generation fallback).
-    - Return public url as /img/<id> so ChatGPT can render inline reliably.
+    - Return public url as /img/<id>.jpg so clients (incl. ChatGPT) render inline reliably.
     """
     stack = [path]
     while stack:
@@ -155,7 +151,7 @@ def walk_images(path: str):
                     it["type"] == "file"
                     and it["name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))
                 ):
-                    rel = it["path"][len(BASE_PATH) :].strip("/")
+                    rel = it["path"][len(BASE_PATH):].strip("/")
                     parts = rel.split("/")[:-1]
                     folder_tags = canonicalize_parts(parts)
 
@@ -166,8 +162,8 @@ def walk_images(path: str):
                     short_id = it["sha"][:8]
                     yield {
                         "id": short_id,
-                        "source_url": it["download_url"],  # NEW: keep GitHub as true source
-                        "url": f"{PUBLIC_BASE_URL}/img/{short_id}",  # NEW: proxy URL for clients/ChatGPT
+                        "source_url": it["download_url"],                 # true source
+                        "url": f"{PUBLIC_BASE_URL}/img/{short_id}.jpg",   # ✅ extension for rendering
                         "title": fname,
                         "tags": all_tags,
                     }
@@ -229,7 +225,7 @@ def pick_options_for_family(family: str, tag_index: dict, limit: int = 3, user_k
                 "tag": tag,
                 "image": {
                     "id": chosen_img["id"],
-                    "url": chosen_img["url"],  # will be proxied /img/<id>
+                    "url": chosen_img["url"],  # ✅ should already be /img/<id>.jpg
                     "title": chosen_img["title"],
                     "tags": chosen_img.get("tags", []),
                 },
@@ -375,6 +371,34 @@ def home():
     return "Hi marjo! Welcome back to Bamboo Image API (images + tags + gpt-image-1 generation)"
 
 
+# ✅ Add a health endpoint that matches your Render health check path (/health)
+@app.get("/health")
+def health():
+    gh_ok, gh_msg = True, "ok"
+    try:
+        _ = gh_list(BASE_PATH)
+    except Exception as e:
+        gh_ok, gh_msg = False, str(e)
+
+    ann_ok = bool(ANNOTATIONS) or os.path.exists(ANNOTATIONS_PATH)
+    openai_ok = bool(OPENAI_API_KEY)
+
+    status = "ok" if (gh_ok and openai_ok) else "degraded"
+
+    return jsonify(
+        {
+            "status": status,
+            "github": {"ok": gh_ok, "detail": gh_msg},
+            "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH},
+            "openai": {"ok": openai_ok, "model": OPENAI_IMAGE_MODEL},
+            "refs": {
+                "max_reference_images": MAX_REFERENCE_IMAGES,
+                "allowed_ref_hosts": sorted(ALLOWED_REF_HOSTS),
+            },
+        }
+    )
+
+
 @app.get("/images")
 def list_images():
     tags_param = request.args.get("tags", "").strip()
@@ -396,7 +420,6 @@ def list_images():
 
     images = list_all_images(limit=10_000)
 
-    # Deterministic ordering so offset works correctly (use source_url/id to avoid URL changes)
     images.sort(
         key=lambda x: (
             x.get("source_url", ""),
@@ -471,33 +494,6 @@ def list_family_options():
     return jsonify({"family": family, "user": user_key or None, "count": len(options), "options": options})
 
 
-@app.get("/health")
-def health():
-    gh_ok, gh_msg = True, "ok"
-    try:
-        _ = gh_list(BASE_PATH)
-    except Exception as e:
-        gh_ok, gh_msg = False, str(e)
-
-    ann_ok = bool(ANNOTATIONS) or os.path.exists(ANNOTATIONS_PATH)
-    openai_ok = bool(OPENAI_API_KEY)
-
-    status = "ok" if (gh_ok and openai_ok) else "degraded"
-
-    return jsonify(
-        {
-            "status": status,
-            "github": {"ok": gh_ok, "detail": gh_msg},
-            "annotations": {"ok": ann_ok, "path": ANNOTATIONS_PATH},
-            "openai": {"ok": openai_ok, "model": OPENAI_IMAGE_MODEL},
-            "refs": {
-                "max_reference_images": MAX_REFERENCE_IMAGES,
-                "allowed_ref_hosts": sorted(ALLOWED_REF_HOSTS),
-            },
-        }
-    )
-
-
 @app.get("/generated/<path:filename>")
 def serve_generated(filename):
     """Serve generated images from the 'generated' folder."""
@@ -553,7 +549,6 @@ def generate():
         with open(filepath, "wb") as f:
             f.write(img_bytes)
 
-        # Use PUBLIC_BASE_URL instead of request.url_root (more reliable behind proxies)
         image_url = f"{PUBLIC_BASE_URL}/generated/{filename}"
 
         return (
@@ -572,11 +567,13 @@ def generate():
         return jsonify({"error": str(e)}), 500
 
 
+# ✅ Proxy route supports both /img/<id> and /img/<id>.jpg
 @app.get("/img/<image_id>")
+@app.get("/img/<image_id>.jpg")
 def proxy_image(image_id):
     """
     Proxy GitHub-hosted images through this API domain
-    so ChatGPT can render them inline.
+    so clients (incl. ChatGPT) can render them inline.
     """
     try:
         images = list_all_images(limit=10_000)
@@ -592,8 +589,13 @@ def proxy_image(image_id):
         r = requests.get(src, stream=True, timeout=15)
         r.raise_for_status()
 
+        # Force inline-friendly headers
         content_type = r.headers.get("content-type", "image/jpeg")
-        return Response(r.iter_content(chunk_size=8192), content_type=content_type)
+        resp = Response(r.iter_content(chunk_size=8192), content_type=content_type)
+        resp.headers["Content-Disposition"] = "inline; filename=image.jpg"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Cache-Control"] = "public, max-age=86400"
+        return resp
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
